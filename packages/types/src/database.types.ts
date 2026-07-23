@@ -2659,7 +2659,7 @@ export type Database = {
         Row: {
           created_at: string
           created_by_user_id: string | null
-          day_of_week: number
+          day_of_week: number | null
           headcount_required: number
           home_id: string
           id: string
@@ -2672,7 +2672,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by_user_id?: string | null
-          day_of_week: number
+          day_of_week?: number | null
           headcount_required?: number
           home_id: string
           id?: string
@@ -2685,7 +2685,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by_user_id?: string | null
-          day_of_week?: number
+          day_of_week?: number | null
           headcount_required?: number
           home_id?: string
           id?: string

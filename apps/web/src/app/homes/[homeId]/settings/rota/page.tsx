@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PageShell } from '@/components/nav/page-shell'
 import { RotaSettingsClient } from './rota-settings-client'
+import { POSITIONS } from '../../import/positions'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -24,11 +25,18 @@ export default async function RotaSettingsPage({ params }: { params: Promise<{ h
     .order('day_of_week')
     .order('role_code')
 
-  const { data: patterns } = await supabase
+  const { data: patternsData } = await supabase
     .from('shift_pattern_templates')
-    .select('id, name')
+    .select('id, name, start_time_local, end_time_local, paid_hours_decimal')
     .eq('home_id', homeId)
-    .order('name')
+    .order('start_time_local')
+  const patterns = (patternsData ?? []).map(p => ({
+    id: p.id,
+    name: p.name,
+    start: String(p.start_time_local).slice(0, 5),
+    end: String(p.end_time_local).slice(0, 5),
+    hours: Number(p.paid_hours_decimal),
+  }))
 
   return (
     <PageShell title="Rota settings" description="Period configuration and standard weekly slot requirements.">
@@ -37,7 +45,8 @@ export default async function RotaSettingsPage({ params }: { params: Promise<{ h
         periodWeeks={home?.rota_period_weeks ?? 1}
         startDay={home?.rota_start_day ?? 1}
         requirements={requirements ?? []}
-        patterns={patterns ?? []}
+        patterns={patterns}
+        positions={POSITIONS}
         days={DAYS}
       />
     </PageShell>

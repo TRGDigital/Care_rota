@@ -98,7 +98,8 @@ export async function createRotaPeriod(
     const dayOfWeek = cursor.getDay()
     const dateStr = cursor.toISOString().split('T')[0]!
 
-    const dayReqs = (requirements ?? []).filter(r => r.day_of_week === dayOfWeek)
+    // A NULL day_of_week means "every day"; otherwise it must match this weekday.
+    const dayReqs = (requirements ?? []).filter(r => r.day_of_week === null || r.day_of_week === dayOfWeek)
 
     for (const req of dayReqs) {
       const tmpl = templateMap.get(req.shift_pattern_template_id)

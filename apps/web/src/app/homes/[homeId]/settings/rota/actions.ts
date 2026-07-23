@@ -28,7 +28,11 @@ export async function saveRotaConfig(homeId: string, formData: FormData) {
 }
 
 const SlotReqSchema = z.object({
-  day_of_week: z.coerce.number().int().min(0).max(6),
+  // '' / 'all' → applies to every day (stored as NULL); otherwise a specific weekday 0–6.
+  day_of_week: z.preprocess(
+    v => (v === '' || v == null || v === 'all' ? null : Number(v)),
+    z.number().int().min(0).max(6).nullable()
+  ),
   shift_pattern_template_id: z.string().uuid(),
   role_code: z.string().min(1).max(50),
   headcount_required: z.coerce.number().int().min(1).max(20),
@@ -49,7 +53,10 @@ export async function addSlotRequirement(homeId: string, formData: FormData) {
     ...parsed.data,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    if (error.code === '23505') return { error: 'A rule for that role, pattern and day already exists.' }
+    return { error: error.message }
+  }
   revalidatePath(`/homes/${homeId}/settings/rota`)
   return { success: true }
 }
