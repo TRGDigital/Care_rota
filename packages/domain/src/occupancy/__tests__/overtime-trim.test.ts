@@ -4,7 +4,7 @@ import { planOvertimeTrims, type StaffWeekOvertime } from '../overtime-trim'
 const base = (over: Partial<StaffWeekOvertime>): StaffWeekOvertime => ({
   staffId: 's1', staffName: 'Staff One', weekKey: '2026-W29',
   lastShiftId: 'shift-1', lastShiftHours: 12, overtimeHours: 8,
-  overtimeWeighting: 50, overtimeRatePence: 1923, ...over,
+  overtimeWeighting: 50, overtimeRatePence: 1923, eligible: true, ...over,
 })
 
 describe('planOvertimeTrims', () => {
@@ -64,6 +64,17 @@ describe('planOvertimeTrims', () => {
     const trims = planOvertimeTrims([base({ overtimeHours: 10, lastShiftHours: 6 })], 0)
     expect(trims[0].reduceHoursBy).toBe(6)
     expect(trims[0].newHours).toBe(0)
+  })
+
+  it('sheds discretionary (non-eligible) overtime before eligible staff, even at higher weighting', () => {
+    // Ancillary worker (not eligible, high weighting) vs an eligible carer (low weighting).
+    // total 16h OT, shed 4h → should come from the non-eligible ancillary first despite weighting.
+    const trims = planOvertimeTrims([
+      base({ staffId: 'laundry', overtimeWeighting: 90, eligible: false }),
+      base({ staffId: 'carer', overtimeWeighting: 10, eligible: true }),
+    ], 0.75)
+    expect(trims).toHaveLength(1)
+    expect(trims[0].staffId).toBe('laundry')
   })
 
   it('keeps weeks independent', () => {

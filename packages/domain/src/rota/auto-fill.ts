@@ -94,7 +94,7 @@ export async function autoFillPeriod(
   // ── 2. Get active staff list ──────────────────────────────────────────
   const { data: staffList } = await supabase
     .from('staff')
-    .select('id, first_name, last_name, overtime_weighting')
+    .select('id, first_name, last_name, overtime_weighting, overtime_eligible')
     .eq('home_id', homeId)
     .eq('status', 'active')
 
@@ -252,8 +252,8 @@ export async function autoFillPeriod(
   }
 
   // Staff overview map
-  const staffById = new Map<string, { id: string; overtime_weighting: number }>(
-    staffList.map((s: { id: string; overtime_weighting: number }) => [s.id, s])
+  const staffById = new Map<string, { id: string; overtime_weighting: number; overtime_eligible?: boolean }>(
+    staffList.map((s: { id: string; overtime_weighting: number; overtime_eligible?: boolean }) => [s.id, s])
   )
 
   // ── 5. Running state for the fill loop ───────────────────────────────
@@ -380,9 +380,16 @@ export async function autoFillPeriod(
         const avg = vals.reduce((a, b) => a + b, 0) / vals.length
         if (avg > 48) continue
 
-        // --- Rank ---
+        // --- Filter: overtime eligibility ---
+        // Staff who aren't overtime-eligible (ancillary roles by default) may work up to their
+        // contracted hours, but must not be pushed into overtime. Skip if this shift would take
+        // them over contract. Overtime is thereby confined to eligible (hands-on) staff.
         const contracted = contract.contracted_hours_per_week * periodWeeksCount
         const accumulated = periodHoursByStaff.get(sid) ?? 0
+        const eligible = staffById.get(sid)?.overtime_eligible !== false
+        if (!eligible && accumulated + shiftHours > contracted) continue
+
+        // --- Rank ---
         const deficit = contracted - accumulated // higher deficit = fill first
         const weighting = staffById.get(sid)?.overtime_weighting ?? 50
         const lastAllocMs = lastAllocByStaff.get(sid)?.getTime() ?? 0

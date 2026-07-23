@@ -28,6 +28,7 @@ export type StaffWeekOvertime = {
   overtimeHours: number      // weekHours - contracted, always > 0 for entries passed in
   overtimeWeighting: number  // 0..100; lower = shed first
   overtimeRatePence: number
+  eligible: boolean          // false = ancillary/discretionary overtime → shed first
 }
 
 export type OvertimeTrim = {
@@ -70,12 +71,13 @@ export function planOvertimeTrims(overtimes: StaffWeekOvertime[], occupancyRatio
     let remaining = round2(totalOvertime * (1 - ratio))
     if (remaining <= 0) continue
 
-    // Lowest weighting shed first; tie-break by larger overtime (shed the biggest offenders).
-    const ordered = [...staff].sort((a, b) =>
-      a.overtimeWeighting !== b.overtimeWeighting
-        ? a.overtimeWeighting - b.overtimeWeighting
-        : b.overtimeHours - a.overtimeHours,
-    )
+    // Shed order: discretionary (non-eligible/ancillary) overtime first, then lowest weighting,
+    // then larger overtime. So the best hands-on workers keep their overtime longest.
+    const ordered = [...staff].sort((a, b) => {
+      if (a.eligible !== b.eligible) return a.eligible ? 1 : -1
+      if (a.overtimeWeighting !== b.overtimeWeighting) return a.overtimeWeighting - b.overtimeWeighting
+      return b.overtimeHours - a.overtimeHours
+    })
 
     for (const o of ordered) {
       if (remaining <= 0) break
@@ -102,7 +104,7 @@ export function planOvertimeTrims(overtimes: StaffWeekOvertime[], occupancyRatio
 // ── Async wrapper: gather the data and plan the trims for a home ─────────────────
 
 type ShiftRow = { id: string; staff_id: string | null; planned_start_utc: string; planned_paid_hours: number | string }
-type StaffRow = { id: string; first_name: string; last_name: string; overtime_weighting: number | null }
+type StaffRow = { id: string; first_name: string; last_name: string; overtime_weighting: number | null; overtime_eligible: boolean | null }
 type ContractRow = { staff_id: string; contracted_hours_per_week: number | string; effective_from: string; effective_to: string | null }
 type PayRateRow = { staff_id: string; rate_overtime_pence: number | string | null; rate_weekday_pence: number | string | null; effective_from: string; effective_to: string | null }
 
@@ -161,7 +163,7 @@ export async function runOvertimeTrim(
 
   const staffIds = [...new Set(shifts.map((s) => s.staff_id as string))]
   const [staffRes, contractRes, payRes] = await Promise.all([
-    supabase.from('staff').select('id, first_name, last_name, overtime_weighting').in('id', staffIds),
+    supabase.from('staff').select('id, first_name, last_name, overtime_weighting, overtime_eligible').in('id', staffIds),
     supabase.from('staff_contracts').select('staff_id, contracted_hours_per_week, effective_from, effective_to').in('staff_id', staffIds),
     supabase.from('staff_pay_rates').select('staff_id, rate_overtime_pence, rate_weekday_pence, effective_from, effective_to').in('staff_id', staffIds),
   ])
@@ -209,6 +211,7 @@ export async function runOvertimeTrim(
         overtimeHours: overtime,
         overtimeWeighting: num(st?.overtime_weighting ?? 50),
         overtimeRatePence: overtimeRate,
+        eligible: st?.overtime_eligible !== false,
       })
     }
   }
