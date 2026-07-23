@@ -15,6 +15,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
     { data: contracts },
     { data: payRates },
     { data: leaveBalances },
+    { data: roleList },
   ] = await Promise.all([
     supabase
       .from('homes')
@@ -23,7 +24,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       .single(),
     supabase
       .from('staff')
-      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible')
+      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible, role_code')
       .eq('home_id', homeId)
       .order('last_name')
       .order('first_name'),
@@ -42,7 +43,14 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       .select('staff_id, entitlement_value, taken_value, balance_remaining, allocation_unit')
       .eq('home_id', homeId)
       .order('leave_year_start', { ascending: false }),
+    supabase
+      .from('staff_roles')
+      .select('code, name')
+      .eq('home_id', homeId)
+      .order('name'),
   ])
+
+  const roles = (roleList ?? []).map(r => ({ code: r.code as string, name: r.name as string }))
 
   const homeUnit = home?.holiday_allocation_unit === 'hours' ? 'h' : 'd'
 
@@ -71,6 +79,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       last_name:         s.last_name,
       employee_number:   s.employee_number ?? null,
       status:            s.status,
+      role_code:         s.role_code ?? null,
       overtime_weighting: s.overtime_weighting != null ? Number(s.overtime_weighting) : null,
       overtime_eligible:  s.overtime_eligible ?? null,
       contract: c ? {
@@ -119,6 +128,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
         homeId={homeId}
         homeUnit={homeUnit}
         staff={enrichedStaff}
+        roles={roles}
         stats={{ activeCount: activeStaff.length, totalHrsWk, avgRatePence }}
         statusCounts={statusCounts}
       />

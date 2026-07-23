@@ -3689,6 +3689,7 @@ export type Database = {
           last_name: string
           ni_number: string | null
           overtime_eligible: boolean
+          role_code: string | null
           overtime_weighting: number
           photo_url: string | null
           status: Database["public"]["Enums"]["staff_status"]
@@ -3712,6 +3713,7 @@ export type Database = {
           last_name: string
           ni_number?: string | null
           overtime_eligible?: boolean
+          role_code?: string | null
           overtime_weighting?: number
           photo_url?: string | null
           status?: Database["public"]["Enums"]["staff_status"]
@@ -3735,6 +3737,7 @@ export type Database = {
           last_name?: string
           ni_number?: string | null
           overtime_eligible?: boolean
+          role_code?: string | null
           overtime_weighting?: number
           photo_url?: string | null
           status?: Database["public"]["Enums"]["staff_status"]
@@ -4211,6 +4214,7 @@ export type Database = {
           home_id: string
           id: string
           name: string
+          overtime_policy: string
           requires_dbs: boolean
           requires_nurse_pin: boolean
           tenant_id: string
@@ -4224,6 +4228,7 @@ export type Database = {
           home_id: string
           id?: string
           name: string
+          overtime_policy?: string
           requires_dbs?: boolean
           requires_nurse_pin?: boolean
           tenant_id: string
@@ -4237,6 +4242,7 @@ export type Database = {
           home_id?: string
           id?: string
           name?: string
+          overtime_policy?: string
           requires_dbs?: boolean
           requires_nurse_pin?: boolean
           tenant_id?: string

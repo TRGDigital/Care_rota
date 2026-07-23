@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { BedForm } from './bed-form'
 import { BulkBedImport } from './bulk-bed-import'
+import { BedCapacityInput } from './bed-capacity-input'
 
 export default async function BedsSettingsPage({
   params,
@@ -16,11 +17,18 @@ export default async function BedsSettingsPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const { data: beds } = await supabase
-    .from('beds')
-    .select('*')
-    .eq('home_id', homeId)
-    .order('room_number', { ascending: true })
+  const [{ data: beds }, { data: home }] = await Promise.all([
+    supabase
+      .from('beds')
+      .select('*')
+      .eq('home_id', homeId)
+      .order('room_number', { ascending: true }),
+    supabase
+      .from('homes')
+      .select('bed_capacity')
+      .eq('id', homeId)
+      .single(),
+  ])
 
   const total = beds?.length ?? 0
   const active = beds?.filter(b => b.status !== 'maintenance').length ?? 0
@@ -38,6 +46,9 @@ export default async function BedsSettingsPage({
             Settings
           </Link>
         </div>
+
+        {/* Quick capacity — set the total number of beds without adding each one */}
+        <BedCapacityInput homeId={homeId} value={home?.bed_capacity ?? 0} />
 
         {/* Summary */}
         <div className="grid grid-cols-3 gap-4">

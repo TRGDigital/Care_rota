@@ -3,6 +3,7 @@
 import { useState, useMemo, Fragment } from 'react'
 import Link from 'next/link'
 import { WeightingInput } from './weighting-input'
+import { RoleSelect } from './role-select'
 import { StaffActionMenu } from './staff-action-menu'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -58,6 +59,7 @@ export type EnrichedStaff = {
   last_name: string
   employee_number: string | null
   status: string
+  role_code: string | null
   overtime_weighting: number | null
   overtime_eligible: boolean | null
   contract: {
@@ -87,6 +89,7 @@ type Props = {
   homeId: string
   homeUnit: string
   staff: EnrichedStaff[]
+  roles: { code: string; name: string }[]
   stats: Stats
   statusCounts: Record<string, number>
 }
@@ -101,7 +104,7 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub: st
   )
 }
 
-export function StaffDirectoryClient({ homeId, homeUnit, staff, stats, statusCounts }: Props) {
+export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, statusCounts }: Props) {
   const [activeTab, setActiveTab] = useState('all')
   const [search, setSearch]       = useState('')
 
@@ -131,7 +134,7 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, stats, statusCou
   const roleGroups = useMemo(() => {
     const groups = new Map<string, EnrichedStaff[]>()
     for (const s of filtered) {
-      const key = s.payRate?.role_code ?? '__unassigned__'
+      const key = s.role_code ?? '__unassigned__'
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(s)
     }
@@ -242,10 +245,8 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, stats, statusCou
                               <div className="text-xs text-ink-subtle font-mono">#{s.employee_number}</div>
                             )}
                           </td>
-                          <td className="px-6 py-3 text-ink-muted text-sm">
-                            {s.payRate?.role_code
-                              ? fmtRole(s.payRate.role_code)
-                              : <span className="text-ink-subtle">—</span>}
+                          <td className="px-6 py-3">
+                            <RoleSelect homeId={homeId} staffId={s.id} value={s.role_code} roles={roles} />
                           </td>
                           <td className="px-6 py-3 text-ink-muted text-sm">
                             {s.contract
