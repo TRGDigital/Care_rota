@@ -732,16 +732,25 @@ function ShiftChip({
   const startHour = Number(startLocal.slice(0, 2))
   const isNight = startHour >= 18 || startHour < 6
 
+  // A short day shift is half a day — tag it AM/PM so a carer working mornings only (no PM chip)
+  // reads at a glance.
+  const paid = Number(shift.planned_paid_hours)
+  const halfDay = !isNight && paid > 0 && paid <= 7
+  const isAfternoon = startHour >= 12
+  const period = halfDay ? (isAfternoon ? 'PM' : 'AM') : null
+
   // Colour the card so key roles stand out: night = indigo, Care Manager = purple, Chef = orange,
-  // premium day = amber, everything else = green.
+  // afternoon half = teal, premium day = amber, everything else = green.
   const tint = isNight ? 'night'
     : staffRole === 'care_manager' ? 'manager'
     : staffRole === 'chef' ? 'chef'
-    : isPremium ? 'premium' : 'day'
+    : isPremium ? 'premium'
+    : (halfDay && isAfternoon) ? 'pm' : 'day'
   const T = {
     night:   { card: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-900', sub: 'text-indigo-700', mark: '🌙 ' },
     manager: { card: 'bg-purple-100 border-purple-300', text: 'text-purple-900', sub: 'text-purple-700', mark: '' },
     chef:    { card: 'bg-orange-100 border-orange-300', text: 'text-orange-900', sub: 'text-orange-700', mark: '' },
+    pm:      { card: 'bg-teal-50 border-teal-200',      text: 'text-foreground/80', sub: 'text-teal-700', mark: '' },
     premium: { card: 'bg-amber-100 border-amber-300',   text: 'text-foreground/80', sub: 'text-amber-700', mark: '' },
     day:     { card: 'bg-green-50 border-green-200',     text: 'text-foreground/80', sub: 'text-muted-foreground', mark: '' },
   }[tint]
@@ -749,8 +758,11 @@ function ShiftChip({
   return (
     <div className={`group/chip rounded p-1.5 text-xs border ${T.card}`}>
       <div className="flex items-center justify-between gap-1 leading-tight">
-        <span className={`font-medium truncate ${T.text}`}>{tpl?.name ?? '—'}</span>
-        <span className={`shrink-0 tabular-nums font-semibold ${T.sub}`}>{Number(shift.planned_paid_hours)}h</span>
+        <span className="flex items-center gap-1 min-w-0">
+          {period && <span className={`shrink-0 text-[9px] font-bold px-1 rounded bg-white/70 ${T.sub}`}>{period}</span>}
+          <span className={`font-medium truncate ${T.text}`}>{tpl?.name ?? '—'}</span>
+        </span>
+        <span className={`shrink-0 tabular-nums font-semibold ${T.sub}`}>{paid}h</span>
       </div>
       <div className={`leading-tight ${T.sub}`}>
         {T.mark}{startLocal}–{endLocal}
