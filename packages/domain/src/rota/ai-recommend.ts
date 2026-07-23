@@ -214,7 +214,42 @@ Rules for your output:
 - Use ONLY the numbers/ids in the snapshot. Never invent figures or ids. estimated_saving_pence must be derived from the provided overtime hours and rates.
 - Name specific staff. Be concrete ("Move X's Thursday afternoon block to Y, who is Nh under contract").
 - Rank by biggest saving first. 3 to 6 suggestions. If overtime is already near zero, say so honestly and suggest fewer.
-- Respond with ONLY a JSON object: {"suggestions":[{"title":string,"detail":string,"category":"reduce_overtime"|"utilise_pm"|"coverage"|"fairness"|"other","estimated_saving_pence":number,"affected":[string],"change":{"type":"reassign","shift_id":string,"to_staff_id":string}}]} where "change" is optional.`
+- Return your answer by calling the return_suggestions tool. Do not write any prose outside the tool call.`
+
+const SUGGESTIONS_TOOL = {
+  name: 'return_suggestions',
+  description: 'Return the ranked rota recommendations.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      suggestions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            detail: { type: 'string' },
+            category: { type: 'string', enum: ['reduce_overtime', 'utilise_pm', 'coverage', 'fairness', 'other'] },
+            estimated_saving_pence: { type: 'number' },
+            affected: { type: 'array', items: { type: 'string' } },
+            change: {
+              type: 'object',
+              description: 'Optional: a single applyable reassignment.',
+              properties: {
+                type: { type: 'string', enum: ['reassign'] },
+                shift_id: { type: 'string' },
+                to_staff_id: { type: 'string' },
+              },
+              required: ['type', 'shift_id', 'to_staff_id'],
+            },
+          },
+          required: ['title', 'detail', 'category', 'estimated_saving_pence', 'affected'],
+        },
+      },
+    },
+    required: ['suggestions'],
+  },
+}
 
 /**
  * Analyse the rota then ask Claude for grounded, read-only recommendations to cut overtime and use
@@ -232,50 +267,42 @@ export async function recommendRotaChanges(
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1800,
+    max_tokens: 2500,
     system: SYSTEM_PROMPT,
+    tools: [SUGGESTIONS_TOOL],
+    tool_choice: { type: 'tool', name: 'return_suggestions' },
     messages: [{
       role: 'user',
       content: `Here is the rota snapshot for a ${snapshot.weeks}-week period. Total overtime is ${snapshot.totals.overtime_hours}h costing £${(snapshot.totals.overtime_cost_pence / 100).toFixed(2)}. Recommend how to reduce it and use the PM shifts.\n\n${JSON.stringify(snapshot)}`,
     }],
   })
 
-  const text = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map(b => b.text).join('\n')
+  // The model is forced to call the tool, so its structured input is already valid JSON.
+  const toolUse = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
+  const raw = (toolUse?.input as { suggestions?: unknown[] } | undefined)?.suggestions
+  if (!Array.isArray(raw)) return { success: false, error: 'The AI did not return any suggestions. Please try again.' }
 
-  let suggestions: AiSuggestion[] = []
-  try {
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    const json = start >= 0 && end > start ? text.slice(start, end + 1) : text
-    const parsed = JSON.parse(json)
-    // Only keep a change whose ids actually exist in the snapshot, so a hallucinated id can never
-    // reach the apply step.
-    const moveableIds = new Set(snapshot.moveable_shifts.map(m => m.id))
-    const underIds = new Set(snapshot.under_contract.map(u => u.staff_id))
-    if (Array.isArray(parsed?.suggestions)) {
-      suggestions = parsed.suggestions
-        .filter((s: unknown): s is AiSuggestion => !!s && typeof (s as AiSuggestion).title === 'string')
-        .map((s: AiSuggestion) => {
-          const c = s.change
-          const validChange = c && c.type === 'reassign' && moveableIds.has(c.shift_id) && underIds.has(c.to_staff_id)
-            ? { type: 'reassign' as const, shift_id: c.shift_id, to_staff_id: c.to_staff_id }
-            : undefined
-          return {
-            title: String(s.title),
-            detail: String(s.detail ?? ''),
-            category: (['reduce_overtime', 'utilise_pm', 'coverage', 'fairness', 'other'].includes(s.category) ? s.category : 'other') as AiSuggestion['category'],
-            estimated_saving_pence: Math.max(0, Math.round(Number(s.estimated_saving_pence) || 0)),
-            affected: Array.isArray(s.affected) ? s.affected.map(String).slice(0, 8) : [],
-            ...(validChange ? { change: validChange } : {}),
-          }
-        })
-        .slice(0, 8)
-    }
-  } catch {
-    return { success: false, error: 'Could not parse the AI response. Please try again.' }
-  }
+  // Only keep a change whose ids actually exist in the snapshot, so a hallucinated id can never
+  // reach the apply step.
+  const moveableIds = new Set(snapshot.moveable_shifts.map(m => m.id))
+  const underIds = new Set(snapshot.under_contract.map(u => u.staff_id))
+  const suggestions: AiSuggestion[] = raw
+    .filter((s: unknown): s is AiSuggestion => !!s && typeof (s as AiSuggestion).title === 'string')
+    .map((s: AiSuggestion) => {
+      const c = s.change
+      const validChange = c && c.type === 'reassign' && moveableIds.has(c.shift_id) && underIds.has(c.to_staff_id)
+        ? { type: 'reassign' as const, shift_id: c.shift_id, to_staff_id: c.to_staff_id }
+        : undefined
+      return {
+        title: String(s.title),
+        detail: String(s.detail ?? ''),
+        category: (['reduce_overtime', 'utilise_pm', 'coverage', 'fairness', 'other'].includes(s.category) ? s.category : 'other') as AiSuggestion['category'],
+        estimated_saving_pence: Math.max(0, Math.round(Number(s.estimated_saving_pence) || 0)),
+        affected: Array.isArray(s.affected) ? s.affected.map(String).slice(0, 8) : [],
+        ...(validChange ? { change: validChange } : {}),
+      }
+    })
+    .slice(0, 8)
 
   return { success: true, suggestions, snapshot }
 }
