@@ -55,6 +55,18 @@ function fmtRole(code: string) {
   return code.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+// Section order on the rota: Care Manager at the top, then nursing/care, then ancillary with
+// chefs bunched together; night staff are handled separately and always sit at the bottom.
+const ROLE_ORDER = [
+  'care_manager', 'senior_nurse', 'nurse', 'senior_care_assistant', 'care_assistant',
+  'activities_coordinator', 'administrator', 'hr', 'marketing', 'company_director',
+  'chef', 'kitchen_porter', 'laundry', 'cleaner_housekeeping',
+]
+function rolePriority(code: string): number {
+  const i = ROLE_ORDER.indexOf(code)
+  return i === -1 ? 50 : i
+}
+
 export function RotaGrid({
   homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds,
 }: {
@@ -165,6 +177,8 @@ export function RotaGrid({
   // Sort by role then name, group into role sections
   const sortedStaff = [...staffDateMap.keys()].sort((a, b) => {
     const ra = staffRoleMap.get(a) ?? '', rb = staffRoleMap.get(b) ?? ''
+    const pa = rolePriority(ra), pb = rolePriority(rb)
+    if (pa !== pb) return pa - pb
     if (ra !== rb) return ra.localeCompare(rb)
     return (staffMap[a] ?? '').localeCompare(staffMap[b] ?? '')
   })
@@ -412,19 +426,30 @@ function ShiftChip({
   const tpl = slot.shift_pattern_templates
   const startHour = tpl ? parseInt(tpl.start_time_local.split(':')[0] ?? '8', 10) : 8
   const isNight = startHour >= 18 || startHour < 6
-  const chipCls = isPremium
-    ? 'bg-amber-100 border-amber-300'
-    : isNight ? 'bg-indigo-100 border-indigo-300 text-indigo-900' : 'bg-green-50 border-green-200'
+
+  // Colour the card so key roles stand out: night = indigo, Care Manager = purple, Chef = orange,
+  // premium day = amber, everything else = green.
+  const tint = isNight ? 'night'
+    : slot.role_code === 'care_manager' ? 'manager'
+    : slot.role_code === 'chef' ? 'chef'
+    : isPremium ? 'premium' : 'day'
+  const T = {
+    night:   { card: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-900', sub: 'text-indigo-700', mark: '🌙 ' },
+    manager: { card: 'bg-purple-100 border-purple-300', text: 'text-purple-900', sub: 'text-purple-700', mark: '' },
+    chef:    { card: 'bg-orange-100 border-orange-300', text: 'text-orange-900', sub: 'text-orange-700', mark: '' },
+    premium: { card: 'bg-amber-100 border-amber-300',   text: 'text-foreground/80', sub: 'text-amber-700', mark: '' },
+    day:     { card: 'bg-green-50 border-green-200',     text: 'text-foreground/80', sub: 'text-muted-foreground', mark: '' },
+  }[tint]
 
   return (
-    <div className={`rounded p-1.5 text-xs border ${chipCls}`}>
+    <div className={`rounded p-1.5 text-xs border ${T.card}`}>
       <div className="flex items-center justify-between gap-1 leading-tight">
-        <span className={`font-medium ${isNight ? 'text-indigo-900' : 'text-foreground/80'}`}>{tpl?.name ?? '—'}</span>
-        <span className={`shrink-0 tabular-nums font-semibold ${isNight ? 'text-indigo-700' : 'text-muted-foreground'}`}>{Number(shift.planned_paid_hours)}h</span>
+        <span className={`font-medium ${T.text}`}>{tpl?.name ?? '—'}</span>
+        <span className={`shrink-0 tabular-nums font-semibold ${T.sub}`}>{Number(shift.planned_paid_hours)}h</span>
       </div>
       {tpl && (
-        <div className={`leading-tight ${isNight ? 'text-indigo-700' : 'text-muted-foreground'}`}>
-          {isNight && '🌙 '}{tpl.start_time_local}–{tpl.end_time_local}
+        <div className={`leading-tight ${T.sub}`}>
+          {T.mark}{tpl.start_time_local}–{tpl.end_time_local}
         </div>
       )}
       <div className="flex items-center justify-between mt-0.5">
