@@ -51,12 +51,13 @@ export default async function RotaBuilderPage({
   const { data: staffData } = assignedStaffIds.length
     ? await supabase
         .from('staff')
-        .select('id, first_name, last_name, shift_type')
+        .select('id, first_name, last_name, shift_type, role_code')
         .in('id', assignedStaffIds)
     : { data: [] }
 
   const staffMap = new Map((staffData ?? []).map(s => [s.id, `${s.first_name} ${s.last_name}`]))
   const nightStaffIds = (staffData ?? []).filter(s => s.shift_type === 'night').map(s => s.id)
+  const staffRoles: Record<string, string> = Object.fromEntries((staffData ?? []).map(s => [s.id, s.role_code ?? '']))
 
   // Build date columns
   const start = new Date(period.period_start_date)
@@ -93,6 +94,7 @@ export default async function RotaBuilderPage({
         shiftsBySlot={shiftsBySlot}
         staffMap={staffRecord}
         nightStaffIds={nightStaffIds}
+        staffRoles={staffRoles}
       />
     </PageShell>
   )

@@ -68,7 +68,7 @@ function rolePriority(code: string): number {
 }
 
 export function RotaGrid({
-  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds,
+  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds, staffRoles,
 }: {
   homeId: string
   periodId: string
@@ -78,6 +78,7 @@ export function RotaGrid({
   shiftsBySlot: Record<string, Shift[]>
   staffMap: Record<string, string>
   nightStaffIds: string[]
+  staffRoles: Record<string, string>
 }) {
   const [pending, startTransition] = useTransition()
   const [selectedShift, setSelectedShift] = useState<{ shiftId: string; slotId: string } | null>(null)
@@ -159,9 +160,8 @@ export function RotaGrid({
 
   // staffDateMap: staffId → date → [{shift, slot}]
   const staffDateMap = new Map<string, Map<string, Array<{ shift: Shift; slot: Slot }>>>()
-  // staffRoleMap: staffId → primary role_code (first slot found)
-  const staffRoleMap = new Map<string, string>()
-
+  // Grouping uses each staff member's actual position (staffRoles), not the role of the slot
+  // they happened to land in, so the rota matches the staff directory.
   for (const slot of slots) {
     for (const shift of shiftsBySlot[slot.id] ?? []) {
       if (!shift.staff_id) continue
@@ -170,13 +170,12 @@ export function RotaGrid({
       let dayArr = dateMap.get(slot.date)
       if (!dayArr) { dayArr = []; dateMap.set(slot.date, dayArr) }
       dayArr.push({ shift, slot })
-      if (!staffRoleMap.has(shift.staff_id)) staffRoleMap.set(shift.staff_id, slot.role_code)
     }
   }
 
   // Sort by role then name, group into role sections
   const sortedStaff = [...staffDateMap.keys()].sort((a, b) => {
-    const ra = staffRoleMap.get(a) ?? '', rb = staffRoleMap.get(b) ?? ''
+    const ra = staffRoles[a] ?? '', rb = staffRoles[b] ?? ''
     const pa = rolePriority(ra), pb = rolePriority(rb)
     if (pa !== pb) return pa - pb
     if (ra !== rb) return ra.localeCompare(rb)
@@ -187,7 +186,7 @@ export function RotaGrid({
   const nightSet = new Set(nightStaffIds)
   const sections: { role: string; staffIds: string[]; isNight: boolean }[] = []
   for (const id of sortedStaff.filter(x => !nightSet.has(x))) {
-    const role = staffRoleMap.get(id) ?? ''
+    const role = staffRoles[id] ?? ''
     const last = sections.at(-1)
     if (last && last.role === role && !last.isNight) last.staffIds.push(id)
     else sections.push({ role, staffIds: [id], isNight: false })
@@ -306,6 +305,7 @@ export function RotaGrid({
                                     key={shift.id}
                                     shift={shift}
                                     slot={slot}
+                                    staffRole={staffRoles[staffId] ?? ''}
                                     isDraft={isDraft}
                                     onUnassign={() => handleUnassign(shift.id)}
                                     pending={pending}
@@ -414,10 +414,11 @@ export function RotaGrid({
 // ── ShiftChip — used in staff rows (shift is always assigned) ─────────────────
 
 function ShiftChip({
-  shift, slot, isDraft, onUnassign, pending,
+  shift, slot, staffRole, isDraft, onUnassign, pending,
 }: {
   shift: Shift
   slot: Slot
+  staffRole: string
   isDraft: boolean
   onUnassign: () => void
   pending: boolean
@@ -430,8 +431,8 @@ function ShiftChip({
   // Colour the card so key roles stand out: night = indigo, Care Manager = purple, Chef = orange,
   // premium day = amber, everything else = green.
   const tint = isNight ? 'night'
-    : slot.role_code === 'care_manager' ? 'manager'
-    : slot.role_code === 'chef' ? 'chef'
+    : staffRole === 'care_manager' ? 'manager'
+    : staffRole === 'chef' ? 'chef'
     : isPremium ? 'premium' : 'day'
   const T = {
     night:   { card: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-900', sub: 'text-indigo-700', mark: '🌙 ' },
