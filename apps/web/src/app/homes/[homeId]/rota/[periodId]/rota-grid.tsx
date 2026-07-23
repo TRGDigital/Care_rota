@@ -20,6 +20,7 @@ type Shift = {
   state: string
   planned_start_utc: string
   planned_end_utc: string
+  planned_paid_hours: number
   is_bank_holiday: boolean
   is_christmas_period: boolean
   premium_multiplier: number
@@ -55,7 +56,7 @@ function fmtRole(code: string) {
 }
 
 export function RotaGrid({
-  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap,
+  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds,
 }: {
   homeId: string
   periodId: string
@@ -64,6 +65,7 @@ export function RotaGrid({
   slots: Slot[]
   shiftsBySlot: Record<string, Shift[]>
   staffMap: Record<string, string>
+  nightStaffIds: string[]
 }) {
   const [pending, startTransition] = useTransition()
   const [selectedShift, setSelectedShift] = useState<{ shiftId: string; slotId: string } | null>(null)
@@ -167,13 +169,18 @@ export function RotaGrid({
     return (staffMap[a] ?? '').localeCompare(staffMap[b] ?? '')
   })
 
-  const sections: { role: string; staffIds: string[] }[] = []
-  for (const id of sortedStaff) {
+  // Day/both staff group by role; night staff are bunched into a single section at the bottom.
+  const nightSet = new Set(nightStaffIds)
+  const sections: { role: string; staffIds: string[]; isNight: boolean }[] = []
+  for (const id of sortedStaff.filter(x => !nightSet.has(x))) {
     const role = staffRoleMap.get(id) ?? ''
     const last = sections.at(-1)
-    if (last?.role === role) last.staffIds.push(id)
-    else sections.push({ role, staffIds: [id] })
+    if (last && last.role === role && !last.isNight) last.staffIds.push(id)
+    else sections.push({ role, staffIds: [id], isNight: false })
   }
+  const nightStaff = sortedStaff.filter(x => nightSet.has(x))
+    .sort((a, b) => (staffMap[a] ?? '').localeCompare(staffMap[b] ?? ''))
+  if (nightStaff.length) sections.push({ role: 'Night Staff', staffIds: nightStaff, isNight: true })
 
   // Unassigned shifts grouped by role_code → date
   const unassignedByRole = new Map<string, Map<string, Array<{ shift: Shift; slot: Slot }>>>()
@@ -254,15 +261,15 @@ export function RotaGrid({
             </tr>
           </thead>
           <tbody>
-            {sections.map(({ role, staffIds }) => (
+            {sections.map(({ role, staffIds, isNight }) => (
               <Fragment key={role}>
                 {/* Role section header */}
                 <tr>
                   <td
                     colSpan={dates.length + 1}
-                    className="py-1.5 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/20 border-b border-t"
+                    className={`py-1.5 px-3 text-xs font-semibold uppercase tracking-wider border-b border-t ${isNight ? 'bg-indigo-100 text-indigo-800' : 'bg-muted/20 text-muted-foreground'}`}
                   >
-                    {fmtRole(role)}
+                    {isNight ? '🌙 Night Staff' : fmtRole(role)}
                   </td>
                 </tr>
 
@@ -403,13 +410,21 @@ function ShiftChip({
 }) {
   const isPremium = shift.is_bank_holiday || shift.is_christmas_period
   const tpl = slot.shift_pattern_templates
+  const startHour = tpl ? parseInt(tpl.start_time_local.split(':')[0] ?? '8', 10) : 8
+  const isNight = startHour >= 18 || startHour < 6
+  const chipCls = isPremium
+    ? 'bg-amber-100 border-amber-300'
+    : isNight ? 'bg-indigo-100 border-indigo-300 text-indigo-900' : 'bg-green-50 border-green-200'
 
   return (
-    <div className={`rounded p-1.5 text-xs border ${isPremium ? 'bg-amber-100 border-amber-300' : 'bg-green-50 border-green-200'}`}>
-      <div className="font-medium text-foreground/80 leading-tight">{tpl?.name ?? '—'}</div>
+    <div className={`rounded p-1.5 text-xs border ${chipCls}`}>
+      <div className="flex items-center justify-between gap-1 leading-tight">
+        <span className={`font-medium ${isNight ? 'text-indigo-900' : 'text-foreground/80'}`}>{tpl?.name ?? '—'}</span>
+        <span className={`shrink-0 tabular-nums font-semibold ${isNight ? 'text-indigo-700' : 'text-muted-foreground'}`}>{Number(shift.planned_paid_hours)}h</span>
+      </div>
       {tpl && (
-        <div className="text-muted-foreground leading-tight">
-          {tpl.start_time_local}–{tpl.end_time_local}
+        <div className={`leading-tight ${isNight ? 'text-indigo-700' : 'text-muted-foreground'}`}>
+          {isNight && '🌙 '}{tpl.start_time_local}–{tpl.end_time_local}
         </div>
       )}
       <div className="flex items-center justify-between mt-0.5">

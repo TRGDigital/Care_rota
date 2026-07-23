@@ -33,6 +33,24 @@ export async function createShiftPattern(homeId: string, formData: FormData) {
   return { success: true }
 }
 
+export async function updateShiftPattern(homeId: string, patternId: string, formData: FormData) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const parsed = ShiftPatternSchema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid input' }
+
+  const { error } = await supabase.from('shift_pattern_templates')
+    .update({ ...parsed.data, updated_by_user_id: user.id })
+    .eq('id', patternId)
+    .eq('home_id', homeId)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/homes/${homeId}/settings/shift-patterns`)
+  return { success: true }
+}
+
 export async function deleteShiftPattern(homeId: string, patternId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

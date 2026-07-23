@@ -50,7 +50,13 @@ export default async function ShiftPatternsPage({ params }: { params: Promise<{ 
                     <td className="px-4 py-3 text-muted-foreground">{p.paid_hours_decimal}h</td>
                     <td className="px-4 py-3 text-muted-foreground">{TYPE_LABELS[p.length_type] ?? p.length_type}</td>
                     <td className="px-4 py-3 text-right">
-                      <DeletePatternButton homeId={homeId} patternId={p.id} />
+                      <div className="flex items-center justify-end gap-3">
+                        <ShiftPatternForm homeId={homeId} pattern={{
+                          id: p.id, name: p.name, start_time_local: p.start_time_local, end_time_local: p.end_time_local,
+                          break_minutes: p.break_minutes, paid_hours_decimal: Number(p.paid_hours_decimal), length_type: p.length_type,
+                        }} />
+                        <DeletePatternButton homeId={homeId} patternId={p.id} />
+                      </div>
                     </td>
                   </tr>
                 ))}

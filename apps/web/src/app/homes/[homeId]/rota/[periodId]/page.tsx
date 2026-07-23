@@ -39,7 +39,7 @@ export default async function RotaBuilderPage({
   const { data: shifts } = slotIds.length
     ? await supabase
         .from('shifts')
-        .select('id, shift_slot_id, staff_id, state, planned_start_utc, planned_end_utc, is_bank_holiday, is_christmas_period, premium_multiplier')
+        .select('id, shift_slot_id, staff_id, state, planned_start_utc, planned_end_utc, planned_paid_hours, is_bank_holiday, is_christmas_period, premium_multiplier')
         .in('shift_slot_id', slotIds)
         .not('state', 'eq', 'cancelled')
     : { data: [] }
@@ -51,11 +51,12 @@ export default async function RotaBuilderPage({
   const { data: staffData } = assignedStaffIds.length
     ? await supabase
         .from('staff')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, shift_type')
         .in('id', assignedStaffIds)
     : { data: [] }
 
   const staffMap = new Map((staffData ?? []).map(s => [s.id, `${s.first_name} ${s.last_name}`]))
+  const nightStaffIds = (staffData ?? []).filter(s => s.shift_type === 'night').map(s => s.id)
 
   // Build date columns
   const start = new Date(period.period_start_date)
@@ -91,6 +92,7 @@ export default async function RotaBuilderPage({
         slots={slots ?? []}
         shiftsBySlot={shiftsBySlot}
         staffMap={staffRecord}
+        nightStaffIds={nightStaffIds}
       />
     </PageShell>
   )
