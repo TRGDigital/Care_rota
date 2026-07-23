@@ -24,7 +24,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       .single(),
     supabase
       .from('staff')
-      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible, role_code')
+      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible, role_code, shift_type')
       .eq('home_id', homeId)
       .order('last_name')
       .order('first_name'),
@@ -80,6 +80,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       employee_number:   s.employee_number ?? null,
       status:            s.status,
       role_code:         s.role_code ?? null,
+      shift_type:        s.shift_type ?? 'both',
       overtime_weighting: s.overtime_weighting != null ? Number(s.overtime_weighting) : null,
       overtime_eligible:  s.overtime_eligible ?? null,
       contract: c ? {

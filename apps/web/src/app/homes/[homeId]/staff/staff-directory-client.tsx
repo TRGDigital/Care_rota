@@ -4,6 +4,7 @@ import { useState, useMemo, Fragment } from 'react'
 import Link from 'next/link'
 import { WeightingInput } from './weighting-input'
 import { RoleSelect } from './role-select'
+import { ShiftTypeSelect, ContractStatusSelect, LeaveEdit } from './inline-editors'
 import { StaffActionMenu } from './staff-action-menu'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -60,6 +61,7 @@ export type EnrichedStaff = {
   employee_number: string | null
   status: string
   role_code: string | null
+  shift_type: string
   overtime_weighting: number | null
   overtime_eligible: boolean | null
   contract: {
@@ -209,12 +211,11 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                 <tr className="border-b border-border-strong text-left bg-canvas/60">
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">Name</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Role</th>
+                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Shift</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Contract</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Hrs/wk</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Pay rate</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center">AL entitlement</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center">AL taken</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center">AL remaining</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Annual leave: entitlement / taken = remaining (hours). Editable.">Annual leave</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Overtime auto-fill priority. Active eligible staff only.">Weighting</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">Status</th>
                   <th className="px-4 py-3" />
@@ -224,7 +225,7 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                 {roleGroups.map(([roleKey, members]) => (
                   <Fragment key={roleKey}>
                     <tr className="border-b border-border bg-canvas/60">
-                      <td colSpan={11} className="px-6 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                      <td colSpan={10} className="px-6 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
                         {roleKey === '__unassigned__' ? 'No role assigned' : fmtRole(roleKey)}
                         <span className="ml-2 font-normal normal-case tracking-normal text-ink-subtle/70">({members.length})</span>
                       </td>
@@ -248,10 +249,11 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                           <td className="px-6 py-3">
                             <RoleSelect homeId={homeId} staffId={s.id} value={s.role_code} roles={roles} />
                           </td>
-                          <td className="px-6 py-3 text-ink-muted text-sm">
-                            {s.contract
-                              ? (CONTRACT_LABELS[s.contract.contract_type] ?? s.contract.contract_type)
-                              : <span className="text-ink-subtle">—</span>}
+                          <td className="px-6 py-3">
+                            <ShiftTypeSelect homeId={homeId} staffId={s.id} value={s.shift_type} />
+                          </td>
+                          <td className="px-6 py-3">
+                            <ContractStatusSelect homeId={homeId} staffId={s.id} contractType={s.contract?.contract_type ?? null} status={s.status} />
                           </td>
                           <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
                             {s.contract ? fmtHours(s.contract.contracted_hours_per_week) : '—'}
@@ -259,22 +261,13 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                           <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
                             {s.payRate ? fmtPence(s.payRate.rate_weekday_pence) : '—'}
                           </td>
-                          <td className="px-6 py-3 text-center tabular-nums text-sm text-ink-muted">
-                            {s.leave
-                              ? `${s.leave.entitlement_value}${unit}`
-                              : s.contract
-                                ? `${s.contract.holiday_entitlement_value}${homeUnit}`
-                                : '—'}
-                          </td>
-                          <td className="px-6 py-3 text-center tabular-nums text-sm text-ink-muted">
-                            {s.leave ? `${s.leave.taken_value}${unit}` : '—'}
-                          </td>
-                          <td className="px-6 py-3 text-center tabular-nums font-medium text-sm">
-                            {s.leave?.balance_remaining != null
-                              ? <span className={Number(s.leave.balance_remaining) < 3 ? 'text-amber-600' : 'text-green-700'}>
-                                  {Number(s.leave.balance_remaining).toFixed(1)}{unit}
-                                </span>
-                              : <span className="text-muted-foreground/50">—</span>}
+                          <td className="px-6 py-3">
+                            <LeaveEdit
+                              homeId={homeId} staffId={s.id}
+                              entitlement={s.leave?.entitlement_value ?? s.contract?.holiday_entitlement_value ?? 0}
+                              taken={s.leave?.taken_value ?? 0}
+                              unit={s.leave ? unit : homeUnit}
+                            />
                           </td>
                           <td className="px-6 py-3 text-center">
                             {!isActive
@@ -311,14 +304,13 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
         <div className="px-6 py-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {[
             { col: 'Name',           desc: 'Full name and employee number. Click to open the staff profile.' },
-            { col: 'Role',           desc: 'Position assigned via the most recent pay rate record.' },
-            { col: 'Contract',       desc: 'Contract type: Full time, Part time, Bank, or Zero hours.' },
+            { col: 'Role',           desc: 'Position (editable). Matches CareStream. Changing it resets overtime eligibility to the role default.' },
+            { col: 'Shift',          desc: 'Whether they work Day, Night, or Both. Matches CareStream shift pattern.' },
+            { col: 'Contract',       desc: 'Full time / Part time / Bank / Zero hours, or Long-term sick (removes them from the rota and the overtime pool).' },
             { col: 'Hrs/wk',         desc: 'Contracted hours per week under the current contract.' },
             { col: 'Pay rate',       desc: 'Weekday pay rate from the most recent pay rate record.' },
-            { col: 'AL entitlement', desc: 'Total annual leave entitlement for the current leave year.' },
-            { col: 'AL taken',       desc: 'Annual leave used so far this leave year.' },
-            { col: 'AL remaining',   desc: 'Remaining balance. Shown in amber when under 3 units.' },
-            { col: 'Weighting',      desc: 'Overtime pool share for this role — active eligible staff only share 100%. Adjusting one person auto-redistributes the rest equally.' },
+            { col: 'Annual leave',   desc: 'Entitlement / taken = remaining (hours). Editable — type in the two boxes. Fill in anyone the holiday import missed.' },
+            { col: 'Weighting',      desc: 'Overtime pool share — all active eligible staff share 100%. Adjusting one auto-redistributes the rest.' },
             { col: 'Status',         desc: 'Employment status. Weighting is only shown for active staff.' },
           ].map(({ col, desc }) => (
             <div key={col} className="flex gap-2 text-sm">
