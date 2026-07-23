@@ -63,6 +63,61 @@ export async function updateContractStatus(homeId: string, staffId: string, valu
   return { ok: true }
 }
 
+// Contracted hours per week (updates the latest contract, or creates one if somehow missing).
+export async function updateContractedHours(homeId: string, staffId: string, hours: number) {
+  const { supabase, user } = await requireUser()
+  if (!user) return { error: 'Unauthorised' }
+  const h = Math.max(0, Number(hours) || 0)
+
+  const { data: contract } = await supabase.from('staff_contracts')
+    .select('id').eq('staff_id', staffId).eq('home_id', homeId)
+    .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+
+  if (contract?.id) {
+    const { error } = await supabase.from('staff_contracts')
+      .update({ contracted_hours_per_week: h, updated_by_user_id: user.id })
+      .eq('id', contract.id)
+    if (error) return { error: error.message }
+  } else {
+    const { error } = await supabase.from('staff_contracts').insert({
+      tenant_id: homeId, home_id: homeId, staff_id: staffId,
+      contract_type: 'part_time', contracted_hours_per_week: h,
+      shift_pattern_preference: 'any', effective_from: '2026-01-01', created_by_user_id: user.id,
+    })
+    if (error) return { error: error.message }
+  }
+  revalidatePath(`/homes/${homeId}/staff`)
+  return { ok: true }
+}
+
+// Delete a staff member. Their setup (contracts, pay rates, fixed shifts, leave, documents,
+// training) is removed, but the delete is refused if they have real payroll or attendance
+// history — those records must be preserved, so mark such staff as Left instead.
+export async function deleteStaff(homeId: string, staffId: string) {
+  const { supabase, user } = await requireUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const historyTables = ['payslips', 'shifts_payable', 'shifts_actual', 'shift_clockings', 'statutory_payment_records'] as const
+  for (const t of historyTables) {
+    const { count } = await supabase.from(t as never).select('*', { count: 'exact', head: true }).eq('staff_id', staffId)
+    if (count && count > 0) {
+      return { error: "This staff member has payroll or attendance history, so can't be deleted. Set their contract to Long-term sick, or mark them as Left, instead." }
+    }
+  }
+
+  // Remove the RESTRICT-guarded setup rows first (the rest cascade / set null on staff delete).
+  for (const t of ['staff_pay_rates', 'staff_contracts', 'leave_requests', 'sickness_episodes'] as const) {
+    await supabase.from(t).delete().eq('staff_id', staffId).eq('home_id', homeId)
+  }
+
+  const { error } = await supabase.from('staff').delete().eq('id', staffId).eq('home_id', homeId)
+  if (error) return { error: error.message }
+
+  await resetToEqualShares(supabase, homeId, user.id) // one fewer in the overtime pool
+  revalidatePath(`/homes/${homeId}/staff`)
+  return { ok: true }
+}
+
 // Specialist / champion roles a staff member holds (multi-select).
 export async function updateSpecialisms(homeId: string, staffId: string, specialisms: string[]) {
   const { supabase, user } = await requireUser()

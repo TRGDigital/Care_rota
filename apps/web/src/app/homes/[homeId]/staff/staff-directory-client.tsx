@@ -4,7 +4,7 @@ import { useState, useMemo, Fragment } from 'react'
 import Link from 'next/link'
 import { WeightingInput } from './weighting-input'
 import { RoleSelect } from './role-select'
-import { ShiftTypeSelect, ContractStatusSelect, LeaveField } from './inline-editors'
+import { ShiftTypeSelect, ContractStatusSelect, LeaveField, ContractedHoursInput } from './inline-editors'
 import { SpecialistRolesSelect } from './specialist-roles-select'
 import { StaffActionMenu } from './staff-action-menu'
 
@@ -265,8 +265,8 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                           <td className="px-6 py-3">
                             <ContractStatusSelect homeId={homeId} staffId={s.id} contractType={s.contract?.contract_type ?? null} status={s.status} />
                           </td>
-                          <td className="px-6 py-3 text-center tabular-nums text-sm text-ink-muted">
-                            {s.contract ? fmtHours(s.contract.contracted_hours_per_week) : '—'}
+                          <td className="px-6 py-3">
+                            <ContractedHoursInput homeId={homeId} staffId={s.id} value={s.contract?.contracted_hours_per_week ?? 0} />
                           </td>
                           <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
                             {s.payRate ? fmtPence(s.payRate.rate_weekday_pence) : '—'}
@@ -306,7 +306,7 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <StaffActionMenu href={`/homes/${homeId}/staff/${s.id}`} />
+                            <StaffActionMenu href={`/homes/${homeId}/staff/${s.id}`} homeId={homeId} staffId={s.id} staffName={`${s.first_name} ${s.last_name}`} />
                           </td>
                         </tr>
                       )

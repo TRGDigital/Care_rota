@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { updateShiftType, updateContractStatus, updateLeave } from './directory-edit-actions'
+import { updateShiftType, updateContractStatus, updateLeave, updateContractedHours } from './directory-edit-actions'
 
 const selectCls = 'text-sm border border-border rounded px-2 py-1 bg-surface text-ink focus:outline-none focus:ring-1 focus:ring-accent/50'
 const numCls = 'w-16 text-center text-xs tabular-nums border border-border rounded px-1 py-0.5 bg-surface focus:outline-none focus:ring-1 focus:ring-accent/50'
@@ -11,6 +11,28 @@ function Tick({ saving, saved }: { saving: boolean; saved: boolean }) {
   if (saving) return <span className="text-xs text-ink-subtle">…</span>
   if (saved) return <span className="text-xs text-green-700">✓</span>
   return null
+}
+
+export function ContractedHoursInput({ homeId, staffId, value }: { homeId: string; staffId: string; value: number }) {
+  const router = useRouter()
+  const [v, setV] = useState(value)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  async function save() {
+    if (v === value) return
+    setSaving(true)
+    await updateContractedHours(homeId, staffId, v)
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 1500); router.refresh()
+  }
+  return (
+    <div className="flex items-center gap-1 justify-center">
+      <input type="number" min={0} step={0.5} value={v}
+        onChange={e => setV(Math.max(0, Number(e.target.value)))}
+        onBlur={save} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        className={numCls} />
+      <Tick saving={saving} saved={saved} />
+    </div>
+  )
 }
 
 export function ShiftTypeSelect({ homeId, staffId, value }: { homeId: string; staffId: string; value: string }) {
