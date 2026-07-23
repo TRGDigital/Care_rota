@@ -67,8 +67,26 @@ function rolePriority(code: string): number {
   return i === -1 ? 50 : i
 }
 
+// Distinct band colour per role group so each section stands out on the rota.
+function sectionTint(role: string, isNight: boolean): string {
+  if (isNight) return 'bg-indigo-100 text-indigo-800 border-indigo-200'
+  switch (role) {
+    case 'care_manager': return 'bg-purple-100 text-purple-800 border-purple-200'
+    case 'senior_nurse':
+    case 'nurse': return 'bg-sky-100 text-sky-800 border-sky-200'
+    case 'senior_care_assistant':
+    case 'care_assistant': return 'bg-emerald-100 text-emerald-800 border-emerald-200'
+    case 'activities_coordinator': return 'bg-teal-100 text-teal-800 border-teal-200'
+    case 'chef':
+    case 'kitchen_porter': return 'bg-orange-100 text-orange-800 border-orange-200'
+    case 'cleaner_housekeeping':
+    case 'laundry': return 'bg-slate-100 text-slate-700 border-slate-200'
+    default: return 'bg-muted/40 text-muted-foreground border-muted'
+  }
+}
+
 export function RotaGrid({
-  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds, staffRoles,
+  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds, staffRoles, staffFinance, weeks,
 }: {
   homeId: string
   periodId: string
@@ -79,6 +97,8 @@ export function RotaGrid({
   staffMap: Record<string, string>
   nightStaffIds: string[]
   staffRoles: Record<string, string>
+  staffFinance: Record<string, { contracted: number; weekdayPence: number; overtimePence: number }>
+  weeks: number
 }) {
   const [pending, startTransition] = useTransition()
   const [selectedShift, setSelectedShift] = useState<{ shiftId: string; slotId: string } | null>(null)
@@ -195,6 +215,28 @@ export function RotaGrid({
     .sort((a, b) => (staffMap[a] ?? '').localeCompare(staffMap[b] ?? ''))
   if (nightStaff.length) sections.push({ role: 'Night Staff', staffIds: nightStaff, isNight: true })
 
+  // Per-staff finance for the summary column: hours worked this period, overtime beyond contracted,
+  // cost (regular hours at weekday rate, overtime at the overtime rate), and what would be saved if
+  // their hours were trimmed back to contracted.
+  function financeFor(staffId: string) {
+    const dateMap = staffDateMap.get(staffId)
+    let hours = 0
+    if (dateMap) for (const arr of dateMap.values()) for (const { shift } of arr) hours += Number(shift.planned_paid_hours)
+    const fin = staffFinance[staffId] ?? { contracted: 0, weekdayPence: 0, overtimePence: 0 }
+    const contractedTotal = fin.contracted * weeks
+    const otHours = Math.max(0, Math.round((hours - contractedTotal) * 10) / 10)
+    const regularHours = Math.max(0, hours - otHours)
+    const costPence = regularHours * fin.weekdayPence + otHours * fin.overtimePence
+    const savingsPence = otHours * fin.overtimePence
+    return { hours: Math.round(hours * 10) / 10, otHours, costPence, savingsPence }
+  }
+  const tot = { hours: 0, otHours: 0, costPence: 0, savingsPence: 0 }
+  for (const id of staffDateMap.keys()) {
+    const f = financeFor(id)
+    tot.hours += f.hours; tot.otHours += f.otHours; tot.costPence += f.costPence; tot.savingsPence += f.savingsPence
+  }
+  const gbp = (p: number) => `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+
   // Unassigned shifts grouped by role_code → date
   const unassignedByRole = new Map<string, Map<string, Array<{ shift: Shift; slot: Slot }>>>()
   for (const slot of slots) {
@@ -258,8 +300,9 @@ export function RotaGrid({
         </div>
       )}
 
-      {/* Grid */}
-      <div className="overflow-x-auto">
+      {/* Grid — breaks out of the centred page shell on wide screens so the full week + summary
+          columns show with less horizontal scrolling. */}
+      <div className="overflow-x-auto -mx-6 lg:-mx-8 xl:-mx-24 2xl:-mx-48 px-6 lg:px-8 xl:px-24 2xl:px-48">
         <table className="min-w-full text-xs border-separate border-spacing-0">
           <thead>
             <tr>
@@ -271,6 +314,10 @@ export function RotaGrid({
                   {fmtDay(d)}
                 </th>
               ))}
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b border-l bg-muted/20 min-w-[70px]" title="Total paid hours this period">Hours</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[70px]" title="Hours beyond contracted">Overtime</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[80px]" title="Total staff cost this period">Cost</th>
+              <th className="text-right py-2 px-3 font-semibold text-emerald-700 border-b bg-emerald-50 min-w-[80px]" title="Saving if hours matched contracted (overtime trimmed)">Savings</th>
             </tr>
           </thead>
           <tbody>
@@ -279,8 +326,8 @@ export function RotaGrid({
                 {/* Role section header */}
                 <tr>
                   <td
-                    colSpan={dates.length + 1}
-                    className={`py-1.5 px-3 text-xs font-semibold uppercase tracking-wider border-b border-t ${isNight ? 'bg-indigo-100 text-indigo-800' : 'bg-muted/20 text-muted-foreground'}`}
+                    colSpan={dates.length + 5}
+                    className={`py-1.5 px-3 text-xs font-semibold uppercase tracking-wider border-b border-t ${sectionTint(role, isNight)}`}
                   >
                     {isNight ? '🌙 Night Staff' : fmtRole(role)}
                   </td>
@@ -289,6 +336,7 @@ export function RotaGrid({
                 {/* One row per staff member */}
                 {staffIds.map(staffId => {
                   const dateMap = staffDateMap.get(staffId)!
+                  const f = financeFor(staffId)
                   return (
                     <tr key={staffId} className="group hover:bg-muted/5">
                       <td className="py-2 px-3 font-medium sticky left-0 z-10 bg-background align-top border-b text-sm whitespace-nowrap">
@@ -318,18 +366,35 @@ export function RotaGrid({
                           </td>
                         )
                       })}
+                      {/* Summary: hours / overtime / cost / savings */}
+                      <td className="py-2 px-3 text-right tabular-nums align-top border-b border-l bg-muted/10 text-sm font-medium">{f.hours}</td>
+                      <td className={`py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm ${f.otHours > 0 ? 'text-amber-700 font-semibold' : 'text-muted-foreground'}`}>{f.otHours > 0 ? f.otHours : '—'}</td>
+                      <td className="py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm">{f.costPence > 0 ? gbp(f.costPence) : '—'}</td>
+                      <td className={`py-2 px-3 text-right tabular-nums align-top border-b bg-emerald-50/60 text-sm ${f.savingsPence > 0 ? 'text-emerald-700 font-semibold' : 'text-muted-foreground'}`}>{f.savingsPence > 0 ? gbp(f.savingsPence) : '—'}</td>
                     </tr>
                   )
                 })}
               </Fragment>
             ))}
 
+            {/* Totals row */}
+            {staffDateMap.size > 0 && (
+              <tr className="border-t-2 border-foreground/20">
+                <td className="py-2.5 px-3 font-semibold sticky left-0 z-10 bg-background align-top border-b text-sm">Totals</td>
+                <td colSpan={dates.length} className="border-b bg-background" />
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b border-l bg-muted/20 text-sm font-bold">{Math.round(tot.hours * 10) / 10}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold text-amber-700">{Math.round(tot.otHours * 10) / 10}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold">{gbp(tot.costPence)}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-emerald-100 text-sm font-bold text-emerald-800">{gbp(tot.savingsPence)}</td>
+              </tr>
+            )}
+
             {/* Unfilled shifts section */}
             {totalUnfilled > 0 && (
               <Fragment key="__unfilled">
                 <tr>
                   <td
-                    colSpan={dates.length + 1}
+                    colSpan={dates.length + 5}
                     className="py-1.5 px-3 text-xs font-semibold text-amber-700 uppercase tracking-wider bg-amber-50 border-b border-t"
                   >
                     Unfilled shifts ({totalUnfilled})
@@ -365,6 +430,7 @@ export function RotaGrid({
                         </td>
                       )
                     })}
+                    <td colSpan={4} className="border-b border-l bg-muted/5" />
                   </tr>
                 ))}
               </Fragment>

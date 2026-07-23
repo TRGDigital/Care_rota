@@ -59,6 +59,23 @@ export default async function RotaBuilderPage({
   const nightStaffIds = (staffData ?? []).filter(s => s.shift_type === 'night').map(s => s.id)
   const staffRoles: Record<string, string> = Object.fromEntries((staffData ?? []).map(s => [s.id, s.role_code ?? '']))
 
+  // Contracted hours + pay rates → per-staff finance for the summary column.
+  const [{ data: contractsData }, { data: ratesData }] = assignedStaffIds.length
+    ? await Promise.all([
+        supabase.from('staff_contracts').select('staff_id, contracted_hours_per_week, effective_from').in('staff_id', assignedStaffIds).order('effective_from', { ascending: false }),
+        supabase.from('staff_pay_rates').select('staff_id, rate_weekday_pence, rate_overtime_pence, effective_from').in('staff_id', assignedStaffIds).order('effective_from', { ascending: false }),
+      ])
+    : [{ data: [] }, { data: [] }]
+  const contractHrs = new Map<string, number>()
+  for (const c of contractsData ?? []) if (!contractHrs.has(c.staff_id)) contractHrs.set(c.staff_id, Number(c.contracted_hours_per_week))
+  const rateOf = new Map<string, { wd: number; ot: number }>()
+  for (const r of ratesData ?? []) if (!rateOf.has(r.staff_id)) rateOf.set(r.staff_id, { wd: Number(r.rate_weekday_pence), ot: Number(r.rate_overtime_pence) })
+  const staffFinance: Record<string, { contracted: number; weekdayPence: number; overtimePence: number }> = {}
+  for (const id of assignedStaffIds) {
+    const r = rateOf.get(id)
+    staffFinance[id] = { contracted: contractHrs.get(id) ?? 0, weekdayPence: r?.wd ?? 0, overtimePence: r?.ot ?? r?.wd ?? 0 }
+  }
+
   // Build date columns
   const start = new Date(period.period_start_date)
   const end = new Date(period.period_end_date)
@@ -95,6 +112,8 @@ export default async function RotaBuilderPage({
         staffMap={staffRecord}
         nightStaffIds={nightStaffIds}
         staffRoles={staffRoles}
+        staffFinance={staffFinance}
+        weeks={Math.max(1, Math.round(dates.length / 7))}
       />
     </PageShell>
   )
