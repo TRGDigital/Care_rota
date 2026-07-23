@@ -182,6 +182,30 @@ export async function createRotaPeriod(
     // must not appear on the rota.
     const activeStaff = new Set((fxStaffRows ?? []).filter((s: { status: string }) => s.status === 'active').map((s: { id: string }) => s.id))
 
+    // Approved leave and sickness within the period — a fixed shift is NOT placed on a date the
+    // staff member is off, leaving the slot open for someone else. This is how the base week
+    // records annual leave and sick leave as it rolls forward.
+    const [leaveRes, sickRes] = await Promise.all([
+      supabase.from('leave_requests')
+        .select('staff_id, start_date, end_date')
+        .in('staff_id', fxStaffIds).eq('status', 'approved')
+        .lte('start_date', periodEndStr).gte('end_date', periodStartStr),
+      supabase.from('sickness_episodes')
+        .select('staff_id, first_day_of_sickness, last_day_of_sickness')
+        .in('staff_id', fxStaffIds)
+        .lte('first_day_of_sickness', periodEndStr)
+        .or(`last_day_of_sickness.is.null,last_day_of_sickness.gte.${periodStartStr}`),
+    ])
+    const offByStaff = new Map<string, Array<{ start: string; end: string | null }>>()
+    for (const lr of leaveRes.data ?? []) {
+      const arr = offByStaff.get(lr.staff_id) ?? []; arr.push({ start: lr.start_date, end: lr.end_date }); offByStaff.set(lr.staff_id, arr)
+    }
+    for (const se of sickRes.data ?? []) {
+      const arr = offByStaff.get(se.staff_id) ?? []; arr.push({ start: se.first_day_of_sickness, end: se.last_day_of_sickness }); offByStaff.set(se.staff_id, arr)
+    }
+    const isOff = (staffId: string, dateStr: string) =>
+      (offByStaff.get(staffId) ?? []).some(iv => iv.start <= dateStr && (iv.end === null || iv.end >= dateStr))
+
     for (const fx of fixedStaff) {
       if (!activeStaff.has(fx.staff_id)) continue
       if (fx.effective_to && new Date(fx.effective_to) < periodStart) continue
@@ -194,6 +218,7 @@ export async function createRotaPeriod(
       while (dayCursor <= periodEnd) {
         if (dayCursor.getUTCDay() === fx.day_of_week) {
           const dateStr = dayCursor.toISOString().split('T')[0]!
+          if (isOff(fx.staff_id, dateStr)) { dayCursor.setDate(dayCursor.getDate() + 1); continue } // on leave/sick — leave the slot open
           const [sH, sM] = tmpl.start_time_local.split(':').map(Number)
           const [eH, eM] = tmpl.end_time_local.split(':').map(Number)
           const st = new Date(`${dateStr}T${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00`)

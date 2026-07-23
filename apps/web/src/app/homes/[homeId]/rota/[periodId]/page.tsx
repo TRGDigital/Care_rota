@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import { PageShell } from '@/components/nav/page-shell'
 import { RotaGrid } from './rota-grid'
+import { CreateBaseWeekButton } from './create-base-week-button'
 
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -115,6 +116,8 @@ export default async function RotaBuilderPage({
       title={`Rota: ${fmtDate(period.period_start_date)} – ${fmtDate(period.period_end_date)}`}
       description={period.status === 'draft' ? 'Draft — not visible to staff' : 'Published'}
       backHref={`/homes/${homeId}/rota`}
+      fullWidth
+      action={<CreateBaseWeekButton homeId={homeId} periodId={periodId} />}
     >
       <RotaGrid
         homeId={homeId}

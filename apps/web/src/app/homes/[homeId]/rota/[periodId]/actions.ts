@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { checkShiftEligibility, publishRotaPeriod, autoFillPeriod } from '@carerota/domain/server'
+import { checkShiftEligibility, publishRotaPeriod, autoFillPeriod, captureBaseWeek, generateHorizon } from '@carerota/domain/server'
 import { z } from 'zod'
 
 const OverrideSchema = z.object({
@@ -365,4 +365,28 @@ export async function autoFillPeriodAction(homeId: string, periodId: string) {
 
   revalidatePath(`/homes/${homeId}/rota/${periodId}`)
   return { success: true, assigned: result.assigned, open: result.open }
+}
+
+// Lock this worked-on week in as the home's repeating base week, then roll it forward across the
+// 6-month horizon. Future weeks repeat the same people on the same shifts, with leave and sickness
+// applied per week and every week individually adjustable.
+export async function createBaseWeekAction(homeId: string, periodId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const captured = await captureBaseWeek(supabase as never, homeId, periodId, user.id)
+  if (!captured.success) return { error: captured.error }
+
+  const horizon = await generateHorizon(supabase as never, homeId, user.id, { weeksAhead: 26 })
+
+  revalidatePath(`/homes/${homeId}/rota`)
+  revalidatePath(`/homes/${homeId}/rota/${periodId}`)
+  return {
+    success: true,
+    patterns: captured.patternsWritten,
+    periodsCreated: horizon.periodsCreated,
+    shiftsPlaced: horizon.shiftsPreFilled + horizon.shiftsAssigned,
+    error: horizon.errors[0],
+  }
 }
