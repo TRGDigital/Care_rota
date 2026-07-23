@@ -13,6 +13,26 @@ async function requireUser() {
   return { supabase, user }
 }
 
+// Unassign a staff member from every upcoming shift (today onwards) so a person taken off the rota
+// (long-term sick, leaver) no longer appears; their shifts revert to unfilled gaps for cover.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function unassignUpcomingShifts(supabase: any, homeId: string, staffId: string, userId: string) {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data: rows } = await supabase
+    .from('shifts')
+    .select('id, shift_slots!inner(date)')
+    .eq('home_id', homeId)
+    .eq('staff_id', staffId)
+    .neq('state', 'cancelled')
+    .gte('shift_slots.date', today)
+  const ids = (rows ?? []).map((r: { id: string }) => r.id)
+  if (ids.length === 0) return
+  await supabase
+    .from('shifts')
+    .update({ staff_id: null, state: 'unassigned', updated_by_user_id: userId })
+    .in('id', ids)
+}
+
 // Day / night / both.
 export async function updateShiftType(homeId: string, staffId: string, shiftType: 'day' | 'night' | 'both') {
   const { supabase, user } = await requireUser()
@@ -37,6 +57,7 @@ export async function updateContractStatus(homeId: string, staffId: string, valu
       .update({ status: 'long_term_sick', overtime_weighting: 0, updated_by_user_id: user.id })
       .eq('id', staffId).eq('home_id', homeId)
     if (error) return { error: error.message }
+    await unassignUpcomingShifts(supabase, homeId, staffId, user.id) // pull them off the rota; gaps show for cover
     await resetToEqualShares(supabase, homeId, user.id) // others absorb their share
     revalidatePath(`/homes/${homeId}/staff`)
     return { ok: true }

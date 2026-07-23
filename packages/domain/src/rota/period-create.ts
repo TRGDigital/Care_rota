@@ -176,10 +176,14 @@ export async function createRotaPeriod(
     const fxTmplMap = new Map((fxTemplates ?? []).map((t: { id: string }) => [t.id, t]))
 
     const fxStaffIds = [...new Set(fixedStaff.map((f: { staff_id: string }) => f.staff_id))]
-    const { data: fxStaffRows } = await supabase.from('staff').select('id, role_code').in('id', fxStaffIds)
+    const { data: fxStaffRows } = await supabase.from('staff').select('id, role_code, status').in('id', fxStaffIds)
     const roleByStaff = new Map((fxStaffRows ?? []).map((s: { id: string; role_code: string | null }) => [s.id, s.role_code ?? 'care_assistant']))
+    // Only active staff get their fixed schedule placed — long-term sick, on leave, or left staff
+    // must not appear on the rota.
+    const activeStaff = new Set((fxStaffRows ?? []).filter((s: { status: string }) => s.status === 'active').map((s: { id: string }) => s.id))
 
     for (const fx of fixedStaff) {
+      if (!activeStaff.has(fx.staff_id)) continue
       if (fx.effective_to && new Date(fx.effective_to) < periodStart) continue
       if (new Date(fx.effective_from) > periodEnd) continue
       const tmpl = fxTmplMap.get(fx.shift_template_id) as { start_time_local: string; end_time_local: string; break_minutes: number; paid_hours_decimal: number } | undefined
