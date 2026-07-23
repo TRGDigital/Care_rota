@@ -167,22 +167,26 @@ export async function createRotaPeriod(
       if (fx.effective_to && new Date(fx.effective_to) < periodStart) continue
       if (new Date(fx.effective_from) > periodEnd) continue
 
-      // Find an unassigned shift matching this staff member's fixed pattern
+      // Slots matching this fixed shift: same template AND same day of week. (The slot's
+      // weekday is derived from its date; assumes a UTC runtime, consistent with slot creation.)
+      const targetSlotIds = slotInserts
+        .filter((s: unknown) => {
+          const slot = s as { id: string; date: string; shift_pattern_template_id?: string }
+          if (slot.shift_pattern_template_id !== fx.shift_template_id) return false
+          return new Date(`${slot.date}T00:00:00Z`).getUTCDay() === fx.day_of_week
+        })
+        .map((s: unknown) => (s as { id: string }).id)
+
+      if (targetSlotIds.length === 0) continue
+
+      // Find an unassigned shift on one of those slots
       const { data: matchingShifts } = await supabase
         .from('shifts')
         .select('id, shift_slot_id')
         .eq('home_id', homeId)
         .is('staff_id', null)
         .eq('state', 'unassigned')
-        .in(
-          'shift_slot_id',
-          slotInserts
-            .filter((s: unknown) => {
-              const slot = s as { day_of_week?: number; shift_pattern_template_id?: string }
-              return slot.shift_pattern_template_id === fx.shift_template_id
-            })
-            .map((s: unknown) => (s as { id: string }).id)
-        )
+        .in('shift_slot_id', targetSlotIds)
         .limit(1)
 
       if (matchingShifts && matchingShifts[0]) {
