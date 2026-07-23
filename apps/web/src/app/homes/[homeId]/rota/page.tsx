@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { PageShell } from '@/components/nav/page-shell'
 import Link from 'next/link'
 import { CreatePeriodButton } from './create-period-button'
+import { GenerateHorizonButton } from './generate-horizon-button'
 import { RebalanceSuggestionsInbox } from './rebalance-suggestions-inbox'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -85,7 +86,12 @@ export default async function RotaPeriodsPage({ params }: { params: Promise<{ ho
     <PageShell
       title="Rota board"
       description="Weekly rota periods"
-      action={<CreatePeriodButton homeId={homeId} disabled={hasDraft} />}
+      action={
+        <div className="flex items-start gap-2">
+          <GenerateHorizonButton homeId={homeId} />
+          <CreatePeriodButton homeId={homeId} disabled={hasDraft} />
+        </div>
+      }
     >
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── Periods list ── */}
