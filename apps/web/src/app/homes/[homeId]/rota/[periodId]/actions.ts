@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { checkShiftEligibility, publishRotaPeriod, autoFillPeriod, captureBaseWeek, generateHorizon } from '@carerota/domain/server'
+import { checkShiftEligibility, publishRotaPeriod, autoFillPeriod, captureBaseWeek, generateHorizon, recommendRotaChanges } from '@carerota/domain/server'
+import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 
 const OverrideSchema = z.object({
@@ -365,6 +366,38 @@ export async function autoFillPeriodAction(homeId: string, periodId: string) {
 
   revalidatePath(`/homes/${homeId}/rota/${periodId}`)
   return { success: true, assigned: result.assigned, open: result.open }
+}
+
+// AI review: analyse the period and return grounded, read-only suggestions to cut overtime and use
+// the PM shift better. Rate-limited per home to bound LLM spend.
+const aiCallLog = new Map<string, number[]>()
+function aiRateLimited(homeId: string, maxPerHour = 12): boolean {
+  const now = Date.now()
+  const recent = (aiCallLog.get(homeId) ?? []).filter(t => now - t < 3_600_000)
+  if (recent.length >= maxPerHour) { aiCallLog.set(homeId, recent); return true }
+  recent.push(now)
+  aiCallLog.set(homeId, recent)
+  return false
+}
+
+export async function aiRecommendAction(homeId: string, periodId: string) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const apiKey = process.env['ANTHROPIC_API_KEY']
+  if (!apiKey) return { error: 'AI is not configured yet (missing API key). Ask an admin to set ANTHROPIC_API_KEY.' }
+
+  if (aiRateLimited(homeId)) return { error: 'Too many AI reviews in the last hour — please wait a little and try again.' }
+
+  const anthropic = new Anthropic({ apiKey })
+  try {
+    const result = await recommendRotaChanges(supabase as never, anthropic, homeId, periodId)
+    if (!result.success) return { error: result.error }
+    return { success: true, suggestions: result.suggestions, snapshot: result.snapshot }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'AI review failed.' }
+  }
 }
 
 // Lock this worked-on week in as the home's repeating base week, then roll it forward across the
