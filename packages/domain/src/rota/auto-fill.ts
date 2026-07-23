@@ -286,9 +286,24 @@ export async function autoFillPeriod(
     shiftsBySlotId.get(sh.shift_slot_id)!.push(sh)
   }
 
-  const sortedSlots = [...slots].sort((a: { role_code: string; date: string }, b: { role_code: string; date: string }) => {
+  type SlotLite = {
+    role_code: string
+    date: string
+    shift_pattern_templates: { paid_hours_decimal: number } | { paid_hours_decimal: number }[] | null
+  }
+  const slotHours = (s: SlotLite): number => {
+    const t = Array.isArray(s.shift_pattern_templates) ? s.shift_pattern_templates[0] : s.shift_pattern_templates
+    return t ? Number(t.paid_hours_decimal) : 0
+  }
+  // Role priority, then date, then LONGEST shift first. Filling long shifts before short ones means
+  // staff with the most room take the full days, and the short shift lands on whoever is left nearest
+  // their contract — minimising the overtime it creates.
+  const sortedSlots = [...slots].sort((a: SlotLite, b: SlotLite) => {
     const rDiff = rolePriority(a.role_code) - rolePriority(b.role_code)
-    return rDiff !== 0 ? rDiff : a.date.localeCompare(b.date)
+    if (rDiff !== 0) return rDiff
+    const dDiff = a.date.localeCompare(b.date)
+    if (dDiff !== 0) return dDiff
+    return slotHours(b) - slotHours(a)
   })
 
   // ── 7. Main fill loop ─────────────────────────────────────────────────
@@ -320,7 +335,7 @@ export async function autoFillPeriod(
       const shiftHours = Number(shift.planned_paid_hours)
 
       // Evaluate each staff member as a candidate
-      const ranked: Array<{ staffId: string; hoursDeficit: number; weighting: number; lastAlloc: number; reason: string }> = []
+      const ranked: Array<{ staffId: string; overtimeAdded: number; hoursDeficit: number; weighting: number; lastAlloc: number; reason: string }> = []
 
       for (const staff of staffList) {
         const sid = staff.id
@@ -390,21 +405,33 @@ export async function autoFillPeriod(
         if (!eligible && accumulated + shiftHours > contracted) continue
 
         // --- Rank ---
-        const deficit = contracted - accumulated // higher deficit = fill first
+        // How much *overtime* this shift would add for this person: the hours it pushes them past
+        // contract, over and above any overtime they already carry. Zero while they are still under
+        // contract. Ranking on this minimises total overtime cost.
+        const projected = accumulated + shiftHours
+        const overtimeAdded = Math.max(0, projected - contracted) - Math.max(0, accumulated - contracted)
+        const deficit = contracted - accumulated // higher deficit = more room under contract
         const weighting = staffById.get(sid)?.overtime_weighting ?? 50
         const lastAllocMs = lastAllocByStaff.get(sid)?.getTime() ?? 0
 
         ranked.push({
           staffId: sid,
+          overtimeAdded,
           hoursDeficit: deficit,
           weighting,
           lastAlloc: lastAllocMs,
-          reason: `Deficit ${deficit.toFixed(1)}h; weighting ${weighting}`,
+          reason: overtimeAdded > 0
+            ? `+${overtimeAdded.toFixed(1)}h overtime (${accumulated.toFixed(1)}/${contracted.toFixed(0)}h); weighting ${weighting}`
+            : `${deficit.toFixed(1)}h under contract; no overtime`,
         })
       }
 
-      // Sort: highest deficit first, then highest weighting, then oldest allocation
+      // Sort: least overtime added first, then most room under contract (level everyone up),
+      // then highest overtime weighting, then oldest allocation. This keeps staff at their
+      // contracted hours where possible and, when overtime is unavoidable, gives it to whoever
+      // is nearest their contract and carries the higher overtime share.
       ranked.sort((a, b) => {
+        if (a.overtimeAdded !== b.overtimeAdded) return a.overtimeAdded - b.overtimeAdded
         if (b.hoursDeficit !== a.hoursDeficit) return b.hoursDeficit - a.hoursDeficit
         if (b.weighting !== a.weighting) return b.weighting - a.weighting
         return a.lastAlloc - b.lastAlloc // oldest first
@@ -420,7 +447,7 @@ export async function autoFillPeriod(
         staff_id: selected?.staffId ?? null,
         candidates_evaluated: ranked.length,
         selected_reason: selected?.reason ?? 'No eligible candidates',
-        ranking_json: ranked.slice(0, 10).map(r => ({ staffId: r.staffId, deficit: r.hoursDeficit, weighting: r.weighting })),
+        ranking_json: ranked.slice(0, 10).map(r => ({ staffId: r.staffId, overtimeAdded: r.overtimeAdded, deficit: r.hoursDeficit, weighting: r.weighting })),
         generated_by_user_id: userId,
       })
 
