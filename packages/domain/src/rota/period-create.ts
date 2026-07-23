@@ -155,7 +155,11 @@ export async function createRotaPeriod(
     if (shiftError) return { success: false, error: shiftError.message }
   }
 
-  // Pre-fill fixed shifts for staff with shift_pattern_preference = 'fixed'
+  // ── Fixed schedules → shifts ──────────────────────────────────────────────────
+  // Place each staff member's fixed weekly pattern onto the rota. If a matching standard-week
+  // slot exists, assign them to it; otherwise create the slot + assigned shift directly. So
+  // allocating a pattern to a staff member (e.g. a night shift) is enough on its own — it does
+  // NOT also have to be added to the standard week.
   let preFillCount = 0
   const { data: fixedStaff } = await supabase
     .from('staff_fixed_shifts')
@@ -163,38 +167,63 @@ export async function createRotaPeriod(
     .eq('home_id', homeId)
 
   if (fixedStaff && fixedStaff.length > 0) {
+    const fxTemplateIds = [...new Set(fixedStaff.map((f: { shift_template_id: string }) => f.shift_template_id))]
+    const { data: fxTemplates } = await supabase
+      .from('shift_pattern_templates')
+      .select('id, start_time_local, end_time_local, break_minutes, paid_hours_decimal')
+      .in('id', fxTemplateIds)
+    const fxTmplMap = new Map((fxTemplates ?? []).map((t: { id: string }) => [t.id, t]))
+
+    const fxStaffIds = [...new Set(fixedStaff.map((f: { staff_id: string }) => f.staff_id))]
+    const { data: fxStaffRows } = await supabase.from('staff').select('id, role_code').in('id', fxStaffIds)
+    const roleByStaff = new Map((fxStaffRows ?? []).map((s: { id: string; role_code: string | null }) => [s.id, s.role_code ?? 'care_assistant']))
+
     for (const fx of fixedStaff) {
       if (fx.effective_to && new Date(fx.effective_to) < periodStart) continue
       if (new Date(fx.effective_from) > periodEnd) continue
+      const tmpl = fxTmplMap.get(fx.shift_template_id) as { start_time_local: string; end_time_local: string; break_minutes: number; paid_hours_decimal: number } | undefined
+      if (!tmpl) continue
 
-      // Slots matching this fixed shift: same template AND same day of week. (The slot's
-      // weekday is derived from its date; assumes a UTC runtime, consistent with slot creation.)
-      const targetSlotIds = slotInserts
-        .filter((s: unknown) => {
-          const slot = s as { id: string; date: string; shift_pattern_template_id?: string }
-          if (slot.shift_pattern_template_id !== fx.shift_template_id) return false
-          return new Date(`${slot.date}T00:00:00Z`).getUTCDay() === fx.day_of_week
-        })
-        .map((s: unknown) => (s as { id: string }).id)
+      // Every matching weekday in the period (supports multi-week periods).
+      const dayCursor = new Date(periodStart)
+      while (dayCursor <= periodEnd) {
+        if (dayCursor.getUTCDay() === fx.day_of_week) {
+          const dateStr = dayCursor.toISOString().split('T')[0]!
+          const [sH, sM] = tmpl.start_time_local.split(':').map(Number)
+          const [eH, eM] = tmpl.end_time_local.split(':').map(Number)
+          const st = new Date(`${dateStr}T${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00`)
+          const en = new Date(`${dateStr}T${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00`)
+          if (en <= st) en.setDate(en.getDate() + 1) // overnight
 
-      if (targetSlotIds.length === 0) continue
+          // Reuse an existing unassigned standard-week slot for this date + template if there is one.
+          const { data: match } = await supabase
+            .from('shifts')
+            .select('id, shift_slots!inner(date, shift_pattern_template_id)')
+            .eq('home_id', homeId)
+            .is('staff_id', null)
+            .eq('state', 'unassigned')
+            .eq('shift_slots.date', dateStr)
+            .eq('shift_slots.shift_pattern_template_id', fx.shift_template_id)
+            .limit(1)
 
-      // Find an unassigned shift on one of those slots
-      const { data: matchingShifts } = await supabase
-        .from('shifts')
-        .select('id, shift_slot_id')
-        .eq('home_id', homeId)
-        .is('staff_id', null)
-        .eq('state', 'unassigned')
-        .in('shift_slot_id', targetSlotIds)
-        .limit(1)
-
-      if (matchingShifts && matchingShifts[0]) {
-        await supabase
-          .from('shifts')
-          .update({ staff_id: fx.staff_id, state: 'assigned', updated_by_user_id: userId })
-          .eq('id', matchingShifts[0].id)
-        preFillCount++
+          if (match && match[0]) {
+            await supabase.from('shifts').update({ staff_id: fx.staff_id, state: 'assigned', updated_by_user_id: userId }).eq('id', match[0].id)
+          } else {
+            const newSlotId = crypto.randomUUID()
+            await supabase.from('shift_slots').insert({
+              id: newSlotId, home_id: homeId, tenant_id: homeId, rota_period_id: periodId,
+              date: dateStr, shift_pattern_template_id: fx.shift_template_id,
+              role_code: roleByStaff.get(fx.staff_id) ?? 'care_assistant', headcount_required: 1, created_by_user_id: userId,
+            })
+            await supabase.from('shifts').insert({
+              home_id: homeId, tenant_id: homeId, shift_slot_id: newSlotId, staff_id: fx.staff_id, state: 'assigned',
+              planned_start_utc: st.toISOString(), planned_end_utc: en.toISOString(),
+              planned_break_minutes: tmpl.break_minutes, planned_paid_hours: tmpl.paid_hours_decimal, created_by_user_id: userId,
+            })
+          }
+          preFillCount++
+        }
+        dayCursor.setDate(dayCursor.getDate() + 1)
       }
     }
   }

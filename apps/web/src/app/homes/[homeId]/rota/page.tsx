@@ -4,6 +4,7 @@ import { PageShell } from '@/components/nav/page-shell'
 import Link from 'next/link'
 import { CreatePeriodButton } from './create-period-button'
 import { GenerateHorizonButton } from './generate-horizon-button'
+import { DeletePeriodButton } from './delete-period-button'
 import { RebalanceSuggestionsInbox } from './rebalance-suggestions-inbox'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -107,23 +108,22 @@ export default async function RotaPeriodsPage({ params }: { params: Promise<{ ho
           )}
 
           {(periods ?? []).map(p => (
-            <Link
-              key={p.id}
-              href={`/homes/${homeId}/rota/${p.id}`}
-              className="flex items-center justify-between bg-card border rounded-lg px-4 py-3 hover:bg-muted/30 transition-colors"
-            >
-              <div>
-                <div className="font-medium text-sm">
-                  {fmtDate(p.period_start_date)} – {fmtDate(p.period_end_date)}
+            <div key={p.id} className="flex items-center gap-2 bg-card border rounded-lg px-4 py-3 hover:bg-muted/30 transition-colors">
+              <Link href={`/homes/${homeId}/rota/${p.id}`} className="flex flex-1 items-center justify-between">
+                <div>
+                  <div className="font-medium text-sm">
+                    {fmtDate(p.period_start_date)} – {fmtDate(p.period_end_date)}
+                  </div>
+                  {p.published_at && (
+                    <div className="text-xs text-muted-foreground">Published {fmtDate(p.published_at.split('T')[0]!)}</div>
+                  )}
                 </div>
-                {p.published_at && (
-                  <div className="text-xs text-muted-foreground">Published {fmtDate(p.published_at.split('T')[0]!)}</div>
-                )}
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[p.status] ?? STATUS_STYLES.draft}`}>
-                {p.status}
-              </span>
-            </Link>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[p.status] ?? STATUS_STYLES.draft}`}>
+                  {p.status}
+                </span>
+              </Link>
+              {p.status === 'draft' && <DeletePeriodButton homeId={homeId} periodId={p.id} />}
+            </div>
           ))}
         </div>
 
