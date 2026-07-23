@@ -4,12 +4,15 @@ import type Anthropic from '@anthropic-ai/sdk'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>
 
+export type SuggestionChange = { type: 'reassign'; shift_id: string; to_staff_id: string }
+
 export type AiSuggestion = {
   title: string
   detail: string
   category: 'reduce_overtime' | 'utilise_pm' | 'coverage' | 'fairness' | 'other'
   estimated_saving_pence: number
   affected: string[]
+  change?: SuggestionChange
 }
 
 export type RotaSnapshot = {
@@ -26,6 +29,10 @@ export type RotaSnapshot = {
     pm_shifts: number
     am_only_days: number
   }>
+  // Shifts held by over-contract staff — candidates to move to someone under contract. Carry the
+  // real shift id so a suggestion can be applied in one click.
+  moveable_shifts: Array<{ id: string; staff: string; staff_id: string; date: string; slot: string; hours: number }>
+  under_contract: Array<{ staff_id: string; name: string; room_hours: number }>
   totals: {
     rotad_hours: number
     overtime_hours: number
@@ -74,7 +81,7 @@ export async function analyseRota(
   const slotIds = slots.map((s: { id: string }) => s.id)
   const { data: shifts } = await supabase
     .from('shifts')
-    .select('shift_slot_id, staff_id, state, planned_start_utc, planned_paid_hours')
+    .select('id, shift_slot_id, staff_id, state, planned_start_utc, planned_paid_hours')
     .in('shift_slot_id', slotIds)
     .not('state', 'eq', 'cancelled')
 
@@ -102,6 +109,7 @@ export async function analyseRota(
   type Acc = { hours: number; am: number; pm: number; amDates: Set<string>; pmDates: Set<string> }
   const acc = new Map<string, Acc>()
   const unfilledMap = new Map<string, number>() // `${role}|${date}` → count
+  const shiftRecords: Array<{ id: string; staff_id: string; date: string; slot: string; hours: number; isNight: boolean }> = []
 
   for (const sh of shifts ?? []) {
     const slot = slotById.get(sh.shift_slot_id) as { date: string; role_code: string } | undefined
@@ -115,6 +123,8 @@ export async function analyseRota(
     const startHour = new Date(sh.planned_start_utc).getUTCHours()
     const isNight = startHour >= 18 || startHour < 6
     const halfDay = !isNight && paid > 0 && paid <= 7
+    const slotLabel = isNight ? 'Night' : halfDay ? (startHour < 12 ? 'AM' : 'PM') : 'Day'
+    shiftRecords.push({ id: sh.id, staff_id: sh.staff_id, date: slot.date, slot: slotLabel, hours: paid, isNight })
     let a = acc.get(sh.staff_id)
     if (!a) { a = { hours: 0, am: 0, pm: 0, amDates: new Set(), pmDates: new Set() }; acc.set(sh.staff_id, a) }
     a.hours += paid
@@ -123,6 +133,8 @@ export async function analyseRota(
   }
 
   const staff: RotaSnapshot['staff'] = []
+  const overStaff = new Set<string>()
+  const under_contract: RotaSnapshot['under_contract'] = []
   let totRotad = 0, totOtHours = 0, totOtCost = 0, totCost = 0, totAm = 0, totPm = 0
   for (const [sid, a] of acc) {
     const contractedWeek = contractHrs.get(sid) ?? 0
@@ -147,9 +159,20 @@ export async function analyseRota(
       pm_shifts: a.pm,
       am_only_days: amOnlyDays,
     })
+    if (otHours > 0) overStaff.add(sid)
+    const room = r1(contractedPeriod - hours)
+    if (room >= 1) under_contract.push({ staff_id: sid, name: nameOf.get(sid) ?? sid, room_hours: room })
     totRotad += hours; totOtHours += otHours; totOtCost += otHours * ot; totCost += cost; totAm += a.am; totPm += a.pm
   }
   staff.sort((x, y) => y.overtime_hours - x.overtime_hours)
+  under_contract.sort((x, y) => y.room_hours - x.room_hours)
+
+  // Moveable = day shifts held by over-contract staff (capped) — these are the ones that can be
+  // reassigned to someone with room to cut overtime.
+  const moveable_shifts = shiftRecords
+    .filter(rec => !rec.isNight && overStaff.has(rec.staff_id))
+    .slice(0, 40)
+    .map(rec => ({ id: rec.id, staff: nameOf.get(rec.staff_id) ?? rec.staff_id, staff_id: rec.staff_id, date: rec.date, slot: rec.slot, hours: rec.hours }))
 
   const unfilled = [...unfilledMap.entries()].map(([k, count]) => {
     const [role, date] = k.split('|') as [string, string]
@@ -159,6 +182,8 @@ export async function analyseRota(
   return {
     weeks: weeksWhole,
     staff,
+    moveable_shifts,
+    under_contract,
     totals: {
       rotad_hours: r1(totRotad),
       overtime_hours: r1(totOtHours),
@@ -181,11 +206,15 @@ Your job: produce concrete, specific, actionable recommendations. Focus on:
 
 Hard rules you must never suggest breaking: 11 hours rest between shifts; 48h average weekly working time; required training must be in date; staff must not exceed a reasonable overtime ceiling; respect day/night preference. If a move would need one of these checked, say so.
 
+Making a suggestion applyable:
+- The snapshot lists "moveable_shifts" (shifts held by over-contract staff, each with an id) and "under_contract" staff (each with a staff_id and how many hours of room they have).
+- When a suggestion is to move ONE specific moveable shift to ONE specific under-contract person, attach a "change": {"type":"reassign","shift_id":<a moveable_shifts id>,"to_staff_id":<an under_contract staff_id>}. Use ids exactly as given. Only attach a change you are confident respects the rules; the app re-checks eligibility before applying. Omit "change" for advisory suggestions that aren't a single clean reassignment.
+
 Rules for your output:
-- Use ONLY the numbers in the snapshot. Never invent figures. estimated_saving_pence must be derived from the provided overtime hours and rates.
+- Use ONLY the numbers/ids in the snapshot. Never invent figures or ids. estimated_saving_pence must be derived from the provided overtime hours and rates.
 - Name specific staff. Be concrete ("Move X's Thursday afternoon block to Y, who is Nh under contract").
 - Rank by biggest saving first. 3 to 6 suggestions. If overtime is already near zero, say so honestly and suggest fewer.
-- Respond with ONLY a JSON object: {"suggestions":[{"title":string,"detail":string,"category":"reduce_overtime"|"utilise_pm"|"coverage"|"fairness"|"other","estimated_saving_pence":number,"affected":[string]}]}`
+- Respond with ONLY a JSON object: {"suggestions":[{"title":string,"detail":string,"category":"reduce_overtime"|"utilise_pm"|"coverage"|"fairness"|"other","estimated_saving_pence":number,"affected":[string],"change":{"type":"reassign","shift_id":string,"to_staff_id":string}}]} where "change" is optional.`
 
 /**
  * Analyse the rota then ask Claude for grounded, read-only recommendations to cut overtime and use
@@ -221,16 +250,27 @@ export async function recommendRotaChanges(
     const end = text.lastIndexOf('}')
     const json = start >= 0 && end > start ? text.slice(start, end + 1) : text
     const parsed = JSON.parse(json)
+    // Only keep a change whose ids actually exist in the snapshot, so a hallucinated id can never
+    // reach the apply step.
+    const moveableIds = new Set(snapshot.moveable_shifts.map(m => m.id))
+    const underIds = new Set(snapshot.under_contract.map(u => u.staff_id))
     if (Array.isArray(parsed?.suggestions)) {
       suggestions = parsed.suggestions
         .filter((s: unknown): s is AiSuggestion => !!s && typeof (s as AiSuggestion).title === 'string')
-        .map((s: AiSuggestion) => ({
-          title: String(s.title),
-          detail: String(s.detail ?? ''),
-          category: (['reduce_overtime', 'utilise_pm', 'coverage', 'fairness', 'other'].includes(s.category) ? s.category : 'other') as AiSuggestion['category'],
-          estimated_saving_pence: Math.max(0, Math.round(Number(s.estimated_saving_pence) || 0)),
-          affected: Array.isArray(s.affected) ? s.affected.map(String).slice(0, 8) : [],
-        }))
+        .map((s: AiSuggestion) => {
+          const c = s.change
+          const validChange = c && c.type === 'reassign' && moveableIds.has(c.shift_id) && underIds.has(c.to_staff_id)
+            ? { type: 'reassign' as const, shift_id: c.shift_id, to_staff_id: c.to_staff_id }
+            : undefined
+          return {
+            title: String(s.title),
+            detail: String(s.detail ?? ''),
+            category: (['reduce_overtime', 'utilise_pm', 'coverage', 'fairness', 'other'].includes(s.category) ? s.category : 'other') as AiSuggestion['category'],
+            estimated_saving_pence: Math.max(0, Math.round(Number(s.estimated_saving_pence) || 0)),
+            affected: Array.isArray(s.affected) ? s.affected.map(String).slice(0, 8) : [],
+            ...(validChange ? { change: validChange } : {}),
+          }
+        })
         .slice(0, 8)
     }
   } catch {

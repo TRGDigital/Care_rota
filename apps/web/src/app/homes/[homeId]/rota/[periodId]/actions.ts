@@ -400,6 +400,77 @@ export async function aiRecommendAction(homeId: string, periodId: string) {
   }
 }
 
+// Apply a single AI suggestion: reassign one shift to an under-contract staff member. Everything is
+// re-checked server-side (the shift must be in this period, the target active, eligibility must pass)
+// so a stale or bad suggestion can't push through an invalid change.
+const ReassignSchema = z.object({
+  type: z.literal('reassign'),
+  shift_id: z.string().uuid(),
+  to_staff_id: z.string().uuid(),
+})
+
+export async function applyRotaSuggestionAction(
+  homeId: string,
+  periodId: string,
+  change: { type: string; shift_id: string; to_staff_id: string }
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const parsed = ReassignSchema.safeParse(change)
+  if (!parsed.success) return { error: 'This suggestion can’t be applied automatically.' }
+  const { shift_id, to_staff_id } = parsed.data
+
+  const { data: shift } = await supabase
+    .from('shifts')
+    .select('id, staff_id, planned_start_utc, planned_end_utc, shift_slot_id')
+    .eq('id', shift_id).eq('home_id', homeId).single()
+  if (!shift) return { error: 'That shift no longer exists.' }
+
+  const { data: slot } = await supabase
+    .from('shift_slots')
+    .select('date, role_code, shift_pattern_template_id, rota_period_id')
+    .eq('id', shift.shift_slot_id).single()
+  if (!slot || slot.rota_period_id !== periodId) return { error: 'That shift is not in this rota.' }
+
+  if (shift.staff_id === to_staff_id) return { error: 'Already assigned to that person.' }
+
+  const { data: target } = await supabase
+    .from('staff')
+    .select('id, first_name, last_name, status')
+    .eq('id', to_staff_id).eq('home_id', homeId).single()
+  if (!target) return { error: 'Target staff not found.' }
+  if (target.status !== 'active') return { error: `${target.first_name} ${target.last_name} is not active.` }
+
+  const eligibility = await checkShiftEligibility(supabase as never, {
+    homeId,
+    staffId: to_staff_id,
+    shiftDate: slot.date,
+    plannedStartUtc: shift.planned_start_utc,
+    plannedEndUtc: shift.planned_end_utc,
+    roleCode: slot.role_code,
+    shiftTemplateId: slot.shift_pattern_template_id,
+  })
+  if (!eligibility.eligible) {
+    const reason = eligibility.blocks[0]?.message ?? 'blocked by a scheduling rule'
+    return { error: `Can’t apply: ${target.first_name} is ${reason}. Adjust it on the rota instead.` }
+  }
+
+  const { error } = await supabase
+    .from('shifts')
+    .update({ staff_id: to_staff_id, state: 'assigned', updated_by_user_id: user.id })
+    .eq('id', shift_id).eq('home_id', homeId)
+  if (error) return { error: error.message }
+
+  revalidatePath(`/homes/${homeId}/rota/${periodId}`)
+  return {
+    success: true,
+    movedTo: `${target.first_name} ${target.last_name}`,
+    warning: eligibility.warnings[0]?.message,
+  }
+}
+
 // Lock this worked-on week in as the home's repeating base week, then roll it forward across the
 // 6-month horizon. Future weeks repeat the same people on the same shifts, with leave and sickness
 // applied per week and every week individually adjustable.
