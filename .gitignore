@@ -1,0 +1,27 @@
+node_modules/
+.pnpm-store/
+.turbo/
+
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+apps/**/.env
+apps/**/.env.local
+apps/**/.env.*.local
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db

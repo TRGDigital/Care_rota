@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@500&display=swap');
+
+@theme {
+  /* ── Design system tokens ─────────────────────────────────────────────────── */
+
+  /* Brand colours */
+  --color-brand-primary:       #1F4E79;
+  --color-brand-primary-hover: #163A5A;
+  --color-brand-primary-light: #E8F0F8;
+
+  /* Accent — coral, THE primary action colour */
+  --color-accent:       #F0654A;
+  --color-accent-hover: #D44E35;
+  --color-accent-light: #FDEAE6;
+
+  /* Neutrals */
+  --color-ink:           #1A2330;
+  --color-ink-muted:     #5B6675;
+  --color-ink-subtle:    #8A95A3;
+  --color-surface:       #FFFFFF;
+  --color-canvas:        #F6F8FA;
+  --color-border:        #E2E7EC;
+  --color-border-strong: #CBD3DC;
+
+  /* Semantic colours */
+  --color-success:       #2E7D52;
+  --color-success-light: #E6F4EC;
+  --color-warning:       #B8860B;
+  --color-warning-light: #FDF4E0;
+  --color-danger:        #C0392B;
+  --color-danger-light:  #FCEAE8;
+  --color-info:          #1F6FB2;
+  --color-info-light:    #E5F1F9;
+  --color-pending:       #7A5BA8;
+  --color-pending-light: #F0EAF7;
+
+  /* ── Backward-compat aliases for existing components ─────────────────────── */
+  /* primary = coral accent (the primary action colour) */
+  --color-primary:             #F0654A;
+  --color-primary-foreground:  #FFFFFF;
+  /* secondary = brand-primary-light (active nav background, tints) */
+  --color-secondary:           #E8F0F8;
+  --color-secondary-foreground:#1F4E79;
+  /* muted = canvas */
+  --color-muted:               #F6F8FA;
+  --color-muted-foreground:    #5B6675;
+  /* background / foreground / card / popover */
+  --color-background:          #F6F8FA;
+  --color-foreground:          #1A2330;
+  --color-card:                #FFFFFF;
+  --color-card-foreground:     #1A2330;
+  --color-popover:             #FFFFFF;
+  --color-popover-foreground:  #1A2330;
+  /* ring / input / destructive */
+  --color-ring:                #F0654A;
+  --color-input:               #E2E7EC;
+  --color-destructive:         #C0392B;
+  --color-destructive-foreground: #FFFFFF;
+
+  /* ── Typography ──────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'Roboto Mono', ui-monospace, monospace;
+
+  /* ── Radii ────────────────────────────────────────────────────────────────── */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   16px;
+  --radius-xl:   16px;   /* override Tailwind default so rounded-xl = card radius */
+  --radius-full: 9999px;
+  --radius:      10px;   /* shadcn compat */
+
+  /* ── Shadows ──────────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(26,35,48,0.06);
+  --shadow-md: 0 4px 12px rgba(26,35,48,0.08);
+  --shadow-lg: 0 12px 32px rgba(26,35,48,0.16);
+
+  /* ── Motion ───────────────────────────────────────────────────────────────── */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+/* ── Global resets ────────────────────────────────────────────────────────────── */
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reduced motion — mandatory */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Input base ──────────────────────────────────────────────────────────────── */
+.input-base {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.375rem;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.input-base::placeholder   { color: var(--color-ink-subtle); }
+.input-base:focus          { border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-light); }
+.input-base:disabled       { opacity: 0.5; cursor: not-allowed; }
+.input-base.error          { border-color: var(--color-danger); }
+.input-base.error:focus    { box-shadow: 0 0 0 3px var(--color-danger-light); }
+
+/* ── Button helpers ──────────────────────────────────────────────────────────── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent);
+  color: #FFFFFF;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.125rem;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.btn-primary:hover              { background-color: var(--color-accent-hover); }
+.btn-primary:focus-visible      { outline: 3px solid var(--color-accent-light); outline-offset: 2px; }
+.btn-primary:disabled           { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.125rem;
+  cursor: pointer;
+  transition: background-color 120ms ease-out;
+}
+.btn-secondary:hover              { background-color: var(--color-canvas); }
+.btn-secondary:focus-visible      { outline: 3px solid var(--color-accent-light); outline-offset: 2px; }
+.btn-secondary:disabled           { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Card helpers ────────────────────────────────────────────────────────────── */
+.card-shadow       { box-shadow: var(--shadow-sm); }
+.card-shadow-hover { box-shadow: var(--shadow-md); }
+
+/* ── Chat message content ────────────────────────────────────────────────────── */
+.message-content p            { margin-bottom: 0.75rem; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content h2           { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
+.message-content h3           { font-size: 0.9rem; font-weight: 600; margin: 0.75rem 0 0.375rem; }
+.message-content ul,
+.message-content ol           { padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.message-content ul           { list-style: disc; }
+.message-content ol           { list-style: decimal; }
+.message-content li           { margin-bottom: 0.25rem; }
+.message-content strong       { font-weight: 600; }
+.message-content em           { font-style: italic; }

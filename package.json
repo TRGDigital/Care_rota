@@ -1,0 +1,25 @@
+{
+  "name": "carerota",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @carerota/web dev",
+    "build": "pnpm --filter @carerota/web build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "pnpm -r lint",
+    "type-check": "pnpm -r type-check",
+    "db:types": "supabase gen types typescript --local > packages/types/src/database.types.ts"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "pg": "^8.20.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}

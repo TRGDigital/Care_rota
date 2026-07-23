@@ -1,0 +1,76 @@
+import type { CsvFile, PayRunExportInput } from './types'
+import { buildCsv, penceToGbp, hoursStr } from './csv-builder'
+
+// Generic wide-column CSV — every field per §8.7 spec
+const HEADERS = [
+  'employee_number', 'first_name', 'last_name', 'ni_number', 'tax_code', 'ni_category',
+  'period_start', 'period_end', 'pay_day', 'weeks_in_period',
+  'hours_weekday', 'rate_weekday', 'gross_weekday',
+  'hours_weekend', 'rate_weekend', 'gross_weekend',
+  'hours_bank_holiday', 'rate_bank_holiday', 'multiplier_bank_holiday', 'gross_bank_holiday',
+  'hours_christmas', 'rate_christmas', 'multiplier_christmas', 'gross_christmas',
+  'hours_night', 'rate_night', 'gross_night',
+  'hours_overtime', 'rate_overtime', 'gross_overtime',
+  'hours_training', 'rate_training', 'gross_training',
+  'hours_holiday', 'rate_holiday', 'gross_holiday',
+  'hours_sickness', 'ssp_amount', 'contractual_sick_amount',
+  'hours_sleep_in', 'sleep_in_flat_rate', 'hours_disturbed', 'gross_sleep_in_total',
+  'gross_total',
+  'pension_employee', 'pension_employer',
+  'paye_tax', 'ni_employee', 'ni_employer', 'student_loan',
+  'net_pay',
+]
+
+export function exportGeneric(input: PayRunExportInput): CsvFile {
+  const rows = input.rows.map(r => [
+    r.employeeNumber, r.firstName, r.lastName, r.niNumber, r.taxCode, r.niCategory,
+    r.periodStart, r.periodEnd, r.payDay, String(r.weeksInPeriod),
+    hoursStr(r.hoursWeekday * 60),
+    penceToGbp(r.rateWeekday),
+    penceToGbp(r.grossWeekday),
+    hoursStr(r.hoursWeekend * 60),
+    penceToGbp(r.rateWeekend),
+    penceToGbp(r.grossWeekend),
+    hoursStr(r.hoursBankHoliday * 60),
+    penceToGbp(r.rateBankHoliday),
+    r.multiplierBankHoliday.toFixed(2),
+    penceToGbp(r.grossBankHoliday),
+    hoursStr(r.hoursChristmas * 60),
+    penceToGbp(r.rateChristmas),
+    r.multiplierChristmas.toFixed(2),
+    penceToGbp(r.grossChristmas),
+    hoursStr(r.hoursNight * 60),
+    penceToGbp(r.rateNight),
+    penceToGbp(r.grossNight),
+    hoursStr(r.hoursOvertime * 60),
+    penceToGbp(r.rateOvertime),
+    penceToGbp(r.grossOvertime),
+    hoursStr(r.hoursTraining * 60),
+    penceToGbp(r.rateTraining),
+    penceToGbp(r.grossTraining),
+    hoursStr(r.hoursHoliday * 60),
+    penceToGbp(r.rateHoliday),
+    penceToGbp(r.grossHoliday),
+    hoursStr(r.hoursSickness * 60),
+    penceToGbp(r.sspAmount),
+    penceToGbp(r.contractualSickAmount),
+    String(r.sleepInCount),
+    penceToGbp(r.sleepInFlatRate),
+    hoursStr(r.hoursDisturbed * 60),
+    penceToGbp(r.grossSleepInTotal),
+    penceToGbp(r.grossTotal),
+    penceToGbp(r.pensionEmployee),
+    penceToGbp(r.pensionEmployer),
+    penceToGbp(r.payeTax),
+    penceToGbp(r.niEmployee),
+    penceToGbp(r.niEmployer),
+    penceToGbp(r.studentLoan),
+    penceToGbp(r.netPay),
+  ])
+
+  return {
+    filename: `payroll-generic-${input.payRunId}.csv`,
+    content: buildCsv(HEADERS, rows),
+    format: 'generic_csv',
+  }
+}
