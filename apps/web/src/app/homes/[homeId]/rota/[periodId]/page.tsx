@@ -39,7 +39,7 @@ export default async function RotaBuilderPage({
   const { data: shifts } = slotIds.length
     ? await supabase
         .from('shifts')
-        .select('id, shift_slot_id, staff_id, state, planned_start_utc, planned_end_utc, planned_paid_hours, is_bank_holiday, is_christmas_period, premium_multiplier')
+        .select('id, shift_slot_id, staff_id, state, planned_start_utc, planned_end_utc, planned_break_minutes, planned_paid_hours, is_bank_holiday, is_christmas_period, premium_multiplier')
         .in('shift_slot_id', slotIds)
         .not('state', 'eq', 'cancelled')
     : { data: [] }
@@ -75,6 +75,20 @@ export default async function RotaBuilderPage({
     const r = rateOf.get(id)
     staffFinance[id] = { contracted: contractHrs.get(id) ?? 0, weekdayPence: r?.wd ?? 0, overtimePence: r?.ot ?? r?.wd ?? 0 }
   }
+
+  // Shift pattern templates for the "add shift" picker
+  const { data: templatesData } = await supabase
+    .from('shift_pattern_templates')
+    .select('id, name, start_time_local, end_time_local, break_minutes')
+    .eq('home_id', homeId)
+    .order('start_time_local')
+  const templates = (templatesData ?? []).map(t => ({
+    id: t.id,
+    name: t.name,
+    start: String(t.start_time_local).slice(0, 5),
+    end: String(t.end_time_local).slice(0, 5),
+    breakMinutes: Number(t.break_minutes),
+  }))
 
   // Build date columns
   const start = new Date(period.period_start_date)
@@ -114,6 +128,7 @@ export default async function RotaBuilderPage({
         staffRoles={staffRoles}
         staffFinance={staffFinance}
         weeks={Math.max(1, Math.round(dates.length / 7))}
+        templates={templates}
       />
     </PageShell>
   )

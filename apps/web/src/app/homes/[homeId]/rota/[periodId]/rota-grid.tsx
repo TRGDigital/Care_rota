@@ -1,8 +1,10 @@
 'use client'
 
 import { Fragment, useState, useTransition } from 'react'
-import { assignShift, assignShiftWithOverride, unassignShift, publishPeriodAction, getEligibleStaff, autoFillPeriodAction } from './actions'
+import { assignShift, assignShiftWithOverride, unassignShift, publishPeriodAction, getEligibleStaff, autoFillPeriodAction, updateShiftTiming, addShiftForStaff } from './actions'
 import type { RuleBlock } from '@carerota/domain'
+
+type Template = { id: string; name: string; start: string; end: string; breakMinutes: number }
 
 type Slot = {
   id: string
@@ -20,6 +22,7 @@ type Shift = {
   state: string
   planned_start_utc: string
   planned_end_utc: string
+  planned_break_minutes: number
   planned_paid_hours: number
   is_bank_holiday: boolean
   is_christmas_period: boolean
@@ -86,7 +89,7 @@ function sectionTint(role: string, isNight: boolean): string {
 }
 
 export function RotaGrid({
-  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds, staffRoles, staffFinance, weeks,
+  homeId, periodId, status, dates, slots, shiftsBySlot, staffMap, nightStaffIds, staffRoles, staffFinance, weeks, templates,
 }: {
   homeId: string
   periodId: string
@@ -99,6 +102,7 @@ export function RotaGrid({
   staffRoles: Record<string, string>
   staffFinance: Record<string, { contracted: number; weekdayPence: number; overtimePence: number }>
   weeks: number
+  templates: Template[]
 }) {
   const [pending, startTransition] = useTransition()
   const [selectedShift, setSelectedShift] = useState<{ shiftId: string; slotId: string } | null>(null)
@@ -108,10 +112,28 @@ export function RotaGrid({
   const [publishError, setPublishError] = useState<string | null>(null)
   const [publishBlocks, setPublishBlocks] = useState<{ shift_id: string; rule_code: string; message: string }[]>([])
   const [toast, setToast] = useState<string | null>(null)
+  const [editTarget, setEditTarget] = useState<{ shift: Shift; label: string } | null>(null)
+  const [addTarget, setAddTarget] = useState<{ staffId: string; date: string; name: string } | null>(null)
 
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
+  }
+
+  function handleSaveTiming(shiftId: string, values: { start_local: string; end_local: string; break_minutes: number }) {
+    startTransition(async () => {
+      const result = await updateShiftTiming(homeId, periodId, shiftId, values)
+      if ('error' in result && result.error) showToast(result.error)
+      else { showToast('Shift times updated'); setEditTarget(null) }
+    })
+  }
+
+  function handleAddShift(staffId: string, date: string, templateId: string, values: { start_local: string; end_local: string; break_minutes: number }) {
+    startTransition(async () => {
+      const result = await addShiftForStaff(homeId, periodId, staffId, date, templateId, values)
+      if ('error' in result && result.error) showToast(result.error)
+      else { showToast('Shift added'); setAddTarget(null) }
+    })
   }
 
   async function openAssignPanel(shiftId: string, slotId: string) {
@@ -222,20 +244,24 @@ export function RotaGrid({
     const dateMap = staffDateMap.get(staffId)
     let hours = 0
     if (dateMap) for (const arr of dateMap.values()) for (const { shift } of arr) hours += Number(shift.planned_paid_hours)
+    hours = Math.round(hours * 10) / 10
     const fin = staffFinance[staffId] ?? { contracted: 0, weekdayPence: 0, overtimePence: 0 }
-    const contractedTotal = fin.contracted * weeks
-    const otHours = Math.max(0, Math.round((hours - contractedTotal) * 10) / 10)
+    const contracted = Math.round(fin.contracted * weeks * 10) / 10
+    const diff = Math.round((hours - contracted) * 10) / 10 // +over / −under contracted
+    const otHours = Math.max(0, diff)
     const regularHours = Math.max(0, hours - otHours)
     const costPence = regularHours * fin.weekdayPence + otHours * fin.overtimePence
     const savingsPence = otHours * fin.overtimePence
-    return { hours: Math.round(hours * 10) / 10, otHours, costPence, savingsPence }
+    return { hours, contracted, diff, otHours, costPence, savingsPence }
   }
-  const tot = { hours: 0, otHours: 0, costPence: 0, savingsPence: 0 }
+  const tot = { hours: 0, contracted: 0, diff: 0, otHours: 0, costPence: 0, savingsPence: 0 }
   for (const id of staffDateMap.keys()) {
     const f = financeFor(id)
-    tot.hours += f.hours; tot.otHours += f.otHours; tot.costPence += f.costPence; tot.savingsPence += f.savingsPence
+    tot.hours += f.hours; tot.contracted += f.contracted; tot.diff += f.diff
+    tot.otHours += f.otHours; tot.costPence += f.costPence; tot.savingsPence += f.savingsPence
   }
   const gbp = (p: number) => `£${(p / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+  const r1 = (n: number) => Math.round(n * 10) / 10
 
   // Unassigned shifts grouped by role_code → date
   const unassignedByRole = new Map<string, Map<string, Array<{ shift: Shift; slot: Slot }>>>()
@@ -314,10 +340,11 @@ export function RotaGrid({
                   {fmtDay(d)}
                 </th>
               ))}
-              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b border-l bg-muted/20 min-w-[70px]" title="Total paid hours this period">Hours</th>
-              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[70px]" title="Hours beyond contracted">Overtime</th>
-              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[80px]" title="Total staff cost this period">Cost</th>
-              <th className="text-right py-2 px-3 font-semibold text-emerald-700 border-b bg-emerald-50 min-w-[80px]" title="Saving if hours matched contracted (overtime trimmed)">Savings</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b border-l bg-muted/20 min-w-[74px]" title="Contracted hours for this period (contracted per week × weeks)">Contracted</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[64px]" title="Paid hours actually rostered this period">Rota&rsquo;d</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[64px]" title="Rostered minus contracted: positive = overtime, negative = under contracted">+/&minus;</th>
+              <th className="text-right py-2 px-3 font-semibold text-muted-foreground border-b bg-muted/20 min-w-[80px]" title="Total staff cost this period (regular hours at weekday rate + overtime at overtime rate)">Cost</th>
+              <th className="text-right py-2 px-3 font-semibold text-emerald-700 border-b bg-emerald-50 min-w-[80px]" title="Overtime cost you would avoid if hours were trimmed back to contracted">Savings</th>
             </tr>
           </thead>
           <tbody>
@@ -326,7 +353,7 @@ export function RotaGrid({
                 {/* Role section header */}
                 <tr>
                   <td
-                    colSpan={dates.length + 5}
+                    colSpan={dates.length + 6}
                     className={`py-1.5 px-3 text-xs font-semibold uppercase tracking-wider border-b border-t ${sectionTint(role, isNight)}`}
                   >
                     {isNight ? '🌙 Night Staff' : fmtRole(role)}
@@ -345,7 +372,7 @@ export function RotaGrid({
                       {dates.map(date => {
                         const dayShifts = dateMap.get(date)
                         return (
-                          <td key={date} className="py-1 px-1 align-top border-b min-w-[120px]">
+                          <td key={date} className="group/cell py-1 px-1 align-top border-b min-w-[120px]">
                             {dayShifts ? (
                               <div className="space-y-0.5">
                                 {dayShifts.map(({ shift, slot }) => (
@@ -356,19 +383,24 @@ export function RotaGrid({
                                     staffRole={staffRoles[staffId] ?? ''}
                                     isDraft={isDraft}
                                     onUnassign={() => handleUnassign(shift.id)}
+                                    onEdit={() => setEditTarget({ shift, label: `${staffMap[staffId] ?? ''} — ${fmtDay(date)}` })}
                                     pending={pending}
                                   />
                                 ))}
+                                <AddShiftButton onClick={() => setAddTarget({ staffId, date, name: staffMap[staffId] ?? '' })} disabled={pending} />
                               </div>
                             ) : (
-                              <div className="h-9" />
+                              <div className="flex items-center justify-center h-9">
+                                <AddShiftButton onClick={() => setAddTarget({ staffId, date, name: staffMap[staffId] ?? '' })} disabled={pending} subtle />
+                              </div>
                             )}
                           </td>
                         )
                       })}
-                      {/* Summary: hours / overtime / cost / savings */}
-                      <td className="py-2 px-3 text-right tabular-nums align-top border-b border-l bg-muted/10 text-sm font-medium">{f.hours}</td>
-                      <td className={`py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm ${f.otHours > 0 ? 'text-amber-700 font-semibold' : 'text-muted-foreground'}`}>{f.otHours > 0 ? f.otHours : '—'}</td>
+                      {/* Summary: contracted / rota'd / diff / cost / savings */}
+                      <td className="py-2 px-3 text-right tabular-nums align-top border-b border-l bg-muted/10 text-sm text-muted-foreground">{f.contracted || '—'}</td>
+                      <td className="py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm font-medium">{f.hours || '—'}</td>
+                      <td className={`py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm ${f.diff > 0 ? 'text-amber-700 font-semibold' : f.diff < 0 ? 'text-sky-700' : 'text-muted-foreground'}`}>{f.diff === 0 ? '0' : f.diff > 0 ? `+${f.diff}` : f.diff}</td>
                       <td className="py-2 px-3 text-right tabular-nums align-top border-b bg-muted/10 text-sm">{f.costPence > 0 ? gbp(f.costPence) : '—'}</td>
                       <td className={`py-2 px-3 text-right tabular-nums align-top border-b bg-emerald-50/60 text-sm ${f.savingsPence > 0 ? 'text-emerald-700 font-semibold' : 'text-muted-foreground'}`}>{f.savingsPence > 0 ? gbp(f.savingsPence) : '—'}</td>
                     </tr>
@@ -382,8 +414,9 @@ export function RotaGrid({
               <tr className="border-t-2 border-foreground/20">
                 <td className="py-2.5 px-3 font-semibold sticky left-0 z-10 bg-background align-top border-b text-sm">Totals</td>
                 <td colSpan={dates.length} className="border-b bg-background" />
-                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b border-l bg-muted/20 text-sm font-bold">{Math.round(tot.hours * 10) / 10}</td>
-                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold text-amber-700">{Math.round(tot.otHours * 10) / 10}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b border-l bg-muted/20 text-sm font-bold text-muted-foreground">{r1(tot.contracted)}</td>
+                <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold">{r1(tot.hours)}</td>
+                <td className={`py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold ${tot.diff > 0 ? 'text-amber-700' : tot.diff < 0 ? 'text-sky-700' : ''}`}>{tot.diff > 0 ? `+${r1(tot.diff)}` : r1(tot.diff)}</td>
                 <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-muted/20 text-sm font-bold">{gbp(tot.costPence)}</td>
                 <td className="py-2.5 px-3 text-right tabular-nums align-top border-b bg-emerald-100 text-sm font-bold text-emerald-800">{gbp(tot.savingsPence)}</td>
               </tr>
@@ -394,7 +427,7 @@ export function RotaGrid({
               <Fragment key="__unfilled">
                 <tr>
                   <td
-                    colSpan={dates.length + 5}
+                    colSpan={dates.length + 6}
                     className="py-1.5 px-3 text-xs font-semibold text-amber-700 uppercase tracking-wider bg-amber-50 border-b border-t"
                   >
                     Unfilled shifts ({totalUnfilled})
@@ -430,7 +463,7 @@ export function RotaGrid({
                         </td>
                       )
                     })}
-                    <td colSpan={4} className="border-b border-l bg-muted/5" />
+                    <td colSpan={5} className="border-b border-l bg-muted/5" />
                   </tr>
                 ))}
               </Fragment>
@@ -438,6 +471,17 @@ export function RotaGrid({
           </tbody>
         </table>
       </div>
+
+      {/* Legend — what the summary columns mean */}
+      {staffDateMap.size > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+          <span><span className="font-medium text-foreground">Contracted</span> — contracted hours for this period (per week × {weeks} {weeks === 1 ? 'week' : 'weeks'})</span>
+          <span><span className="font-medium text-foreground">Rota&rsquo;d</span> — hours actually rostered</span>
+          <span><span className="font-medium text-amber-700">+/&minus;</span> — rostered minus contracted (+ is overtime, &minus; is under contracted)</span>
+          <span><span className="font-medium text-foreground">Cost</span> — regular hours at weekday rate + overtime at overtime rate</span>
+          <span><span className="font-medium text-emerald-700">Savings</span> — the overtime cost you would avoid by trimming everyone&rsquo;s hours back to contracted</span>
+        </div>
+      )}
 
       {slots.length === 0 && (
         <div className="text-center py-12 text-sm text-muted-foreground">
@@ -473,6 +517,195 @@ export function RotaGrid({
           pending={pending}
         />
       )}
+
+      {/* Edit shift times */}
+      {editTarget && (
+        <EditShiftModal
+          label={editTarget.label}
+          shift={editTarget.shift}
+          onSave={(v) => handleSaveTiming(editTarget.shift.id, v)}
+          onClose={() => setEditTarget(null)}
+          pending={pending}
+        />
+      )}
+
+      {/* Add a shift */}
+      {addTarget && (
+        <AddShiftModal
+          name={addTarget.name}
+          date={addTarget.date}
+          templates={templates}
+          onAdd={(templateId, v) => handleAddShift(addTarget.staffId, addTarget.date, templateId, v)}
+          onClose={() => setAddTarget(null)}
+          pending={pending}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Small "+ add" affordance shown in each staff/day cell ─────────────────────
+
+function AddShiftButton({ onClick, disabled, subtle }: { onClick: () => void; disabled: boolean; subtle?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title="Add a shift"
+      className={`w-full rounded border border-dashed text-[11px] py-0.5 transition-colors disabled:opacity-40 ${
+        subtle
+          ? 'border-transparent text-transparent group-hover/cell:border-muted-foreground/30 group-hover/cell:text-muted-foreground/70 hover:!bg-muted/40'
+          : 'border-muted-foreground/25 text-muted-foreground/60 hover:bg-muted/40 hover:text-muted-foreground'
+      }`}
+    >
+      + shift
+    </button>
+  )
+}
+
+// ── Shared time inputs used by the edit + add modals ──────────────────────────
+
+function computePaidHours(startHM: string, endHM: string, breakMin: number): number {
+  const m = /^(\d{2}):(\d{2})$/
+  const s = startHM.match(m), e = endHM.match(m)
+  if (!s || !e) return 0
+  const startMin = Number(s[1]) * 60 + Number(s[2])
+  let endMin = Number(e[1]) * 60 + Number(e[2])
+  if (endMin <= startMin) endMin += 24 * 60
+  return Math.max(0, Math.round((endMin - startMin - breakMin) / 6) / 10)
+}
+
+function utcHM(iso: string): string {
+  const d = new Date(iso)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function TimeFields({
+  start, end, brk, onStart, onEnd, onBrk,
+}: {
+  start: string; end: string; brk: number
+  onStart: (v: string) => void; onEnd: (v: string) => void; onBrk: (v: number) => void
+}) {
+  const paid = computePaidHours(start, end, brk)
+  const overnight = (() => {
+    const sm = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5))
+    const em = Number(end.slice(0, 2)) * 60 + Number(end.slice(3, 5))
+    return em <= sm
+  })()
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <label className="block">
+          <span className="block text-xs font-medium mb-1">Start</span>
+          <input type="time" value={start} onChange={e => onStart(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm bg-background" />
+        </label>
+        <label className="block">
+          <span className="block text-xs font-medium mb-1">End{overnight && <span className="text-amber-600"> +1d</span>}</span>
+          <input type="time" value={end} onChange={e => onEnd(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm bg-background" />
+        </label>
+        <label className="block">
+          <span className="block text-xs font-medium mb-1">Break (min)</span>
+          <input type="number" min={0} max={600} step={5} value={brk} onChange={e => onBrk(Number(e.target.value) || 0)} className="w-full border rounded px-2 py-1.5 text-sm bg-background" />
+        </label>
+      </div>
+      <p className="text-xs text-muted-foreground">Paid hours: <span className="font-semibold text-foreground tabular-nums">{paid}h</span> {overnight && <span className="text-amber-600">(overnight)</span>}</p>
+    </div>
+  )
+}
+
+function EditShiftModal({
+  label, shift, onSave, onClose, pending,
+}: {
+  label: string
+  shift: Shift
+  onSave: (v: { start_local: string; end_local: string; break_minutes: number }) => void
+  onClose: () => void
+  pending: boolean
+}) {
+  const [start, setStart] = useState(utcHM(shift.planned_start_utc))
+  const [end, setEnd] = useState(utcHM(shift.planned_end_utc))
+  const [brk, setBrk] = useState(shift.planned_break_minutes ?? 0)
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-background rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold">Edit shift times</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+        </div>
+        <TimeFields start={start} end={end} brk={brk} onStart={setStart} onEnd={setEnd} onBrk={setBrk} />
+        <div className="flex gap-2 justify-end pt-1">
+          <button type="button" onClick={onClose} className="text-sm px-3 py-1.5 rounded border">Cancel</button>
+          <button
+            onClick={() => onSave({ start_local: start, end_local: end, break_minutes: brk })}
+            disabled={pending}
+            className="text-sm px-3 py-1.5 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {pending ? 'Saving…' : 'Save times'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AddShiftModal({
+  name, date, templates, onAdd, onClose, pending,
+}: {
+  name: string
+  date: string
+  templates: Template[]
+  onAdd: (templateId: string, v: { start_local: string; end_local: string; break_minutes: number }) => void
+  onClose: () => void
+  pending: boolean
+}) {
+  const first = templates[0]
+  const [templateId, setTemplateId] = useState(first?.id ?? '')
+  const [start, setStart] = useState(first?.start ?? '09:00')
+  const [end, setEnd] = useState(first?.end ?? '17:00')
+  const [brk, setBrk] = useState(first?.breakMinutes ?? 0)
+
+  function pickTemplate(id: string) {
+    setTemplateId(id)
+    const t = templates.find(t => t.id === id)
+    if (t) { setStart(t.start); setEnd(t.end); setBrk(t.breakMinutes) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-background rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold">Add a shift</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{name} — {fmtDay(date)}</p>
+        </div>
+
+        {templates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No shift patterns set up. Add one in Settings → Shift patterns first.</p>
+        ) : (
+          <>
+            <label className="block">
+              <span className="block text-xs font-medium mb-1">Shift pattern</span>
+              <select value={templateId} onChange={e => pickTemplate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm bg-background">
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.start}–{t.end})</option>
+                ))}
+              </select>
+              <span className="block text-[11px] text-muted-foreground mt-1">Prefills the times below — adjust if this day differs.</span>
+            </label>
+            <TimeFields start={start} end={end} brk={brk} onStart={setStart} onEnd={setEnd} onBrk={setBrk} />
+            <div className="flex gap-2 justify-end pt-1">
+              <button type="button" onClick={onClose} className="text-sm px-3 py-1.5 rounded border">Cancel</button>
+              <button
+                onClick={() => onAdd(templateId, { start_local: start, end_local: end, break_minutes: brk })}
+                disabled={pending || !templateId}
+                className="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {pending ? 'Adding…' : 'Add shift'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -480,18 +713,23 @@ export function RotaGrid({
 // ── ShiftChip — used in staff rows (shift is always assigned) ─────────────────
 
 function ShiftChip({
-  shift, slot, staffRole, isDraft, onUnassign, pending,
+  shift, slot, staffRole, isDraft, onUnassign, onEdit, pending,
 }: {
   shift: Shift
   slot: Slot
   staffRole: string
   isDraft: boolean
   onUnassign: () => void
+  onEdit: () => void
   pending: boolean
 }) {
   const isPremium = shift.is_bank_holiday || shift.is_christmas_period
   const tpl = slot.shift_pattern_templates
-  const startHour = tpl ? parseInt(tpl.start_time_local.split(':')[0] ?? '8', 10) : 8
+  // Times shown come from the shift's own planned times, so manual edits are reflected even when
+  // they no longer match the originating pattern template.
+  const startLocal = utcHM(shift.planned_start_utc)
+  const endLocal = utcHM(shift.planned_end_utc)
+  const startHour = Number(startLocal.slice(0, 2))
   const isNight = startHour >= 18 || startHour < 6
 
   // Colour the card so key roles stand out: night = indigo, Care Manager = purple, Chef = orange,
@@ -509,28 +747,36 @@ function ShiftChip({
   }[tint]
 
   return (
-    <div className={`rounded p-1.5 text-xs border ${T.card}`}>
+    <div className={`group/chip rounded p-1.5 text-xs border ${T.card}`}>
       <div className="flex items-center justify-between gap-1 leading-tight">
-        <span className={`font-medium ${T.text}`}>{tpl?.name ?? '—'}</span>
+        <span className={`font-medium truncate ${T.text}`}>{tpl?.name ?? '—'}</span>
         <span className={`shrink-0 tabular-nums font-semibold ${T.sub}`}>{Number(shift.planned_paid_hours)}h</span>
       </div>
-      {tpl && (
-        <div className={`leading-tight ${T.sub}`}>
-          {T.mark}{tpl.start_time_local}–{tpl.end_time_local}
-        </div>
-      )}
-      <div className="flex items-center justify-between mt-0.5">
+      <div className={`leading-tight ${T.sub}`}>
+        {T.mark}{startLocal}–{endLocal}
+      </div>
+      <div className="flex items-center justify-between mt-0.5 gap-1">
         {isPremium && <span className="text-amber-700">{shift.premium_multiplier}×</span>}
-        {isDraft && (
+        <div className="ml-auto flex items-center gap-1.5 opacity-60 group-hover/chip:opacity-100 transition-opacity">
           <button
-            onClick={onUnassign}
+            onClick={onEdit}
             disabled={pending}
-            className="text-destructive/50 hover:text-destructive text-xs disabled:opacity-40 ml-auto"
-            title="Unassign"
+            className={`${T.sub} hover:text-foreground text-xs disabled:opacity-40`}
+            title="Edit times"
           >
-            ×
+            ✎
           </button>
-        )}
+          {isDraft && (
+            <button
+              onClick={onUnassign}
+              disabled={pending}
+              className="text-destructive/50 hover:text-destructive text-xs disabled:opacity-40"
+              title="Unassign"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

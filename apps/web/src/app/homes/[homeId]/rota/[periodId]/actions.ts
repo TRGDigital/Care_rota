@@ -207,6 +207,154 @@ export async function getEligibleStaff(homeId: string, shiftId: string) {
   return { staff: results }
 }
 
+// ── Time-block editing ────────────────────────────────────────────────────────
+// Managers can adjust an existing block's times or add a new block, on BOTH draft and
+// published rotas. Times are wall-clock (HH:MM) in the home's local day; we store them as
+// UTC-naive timestamps the same way the generator does, so display round-trips cleanly.
+
+const TimeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM')
+const TimingSchema = z.object({
+  start_local: TimeStr,
+  end_local: TimeStr,
+  break_minutes: z.coerce.number().int().min(0).max(600),
+})
+
+function buildTimes(date: string, startLocal: string, endLocal: string, breakMinutes: number) {
+  const [sh, sm] = startLocal.split(':').map(Number) as [number, number]
+  const [eh, em] = endLocal.split(':').map(Number) as [number, number]
+  const startMin = sh * 60 + sm
+  let endMin = eh * 60 + em
+  let endDate = date
+  if (endMin <= startMin) {
+    endMin += 24 * 60 // overnight → end rolls to the next day
+    const d = new Date(`${date}T00:00:00.000Z`)
+    d.setUTCDate(d.getUTCDate() + 1)
+    endDate = d.toISOString().slice(0, 10)
+  }
+  const paidHours = Math.max(0, Math.round((endMin - startMin - breakMinutes) / 0.6) / 100)
+  return {
+    startUtc: `${date}T${startLocal}:00.000Z`,
+    endUtc: `${endDate}T${endLocal}:00.000Z`,
+    paidHours,
+  }
+}
+
+export async function updateShiftTiming(
+  homeId: string,
+  periodId: string,
+  shiftId: string,
+  raw: { start_local: string; end_local: string; break_minutes: number }
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const parsed = TimingSchema.safeParse(raw)
+  if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid times' }
+
+  const { data: shift } = await supabase
+    .from('shifts')
+    .select('shift_slot_id')
+    .eq('id', shiftId)
+    .eq('home_id', homeId)
+    .single()
+  if (!shift) return { error: 'Shift not found' }
+
+  const { data: slot } = await supabase
+    .from('shift_slots')
+    .select('date')
+    .eq('id', shift.shift_slot_id)
+    .single()
+  if (!slot) return { error: 'Slot not found' }
+
+  const { startUtc, endUtc, paidHours } = buildTimes(
+    slot.date, parsed.data.start_local, parsed.data.end_local, parsed.data.break_minutes
+  )
+
+  const { error } = await supabase
+    .from('shifts')
+    .update({
+      planned_start_utc: startUtc,
+      planned_end_utc: endUtc,
+      planned_break_minutes: parsed.data.break_minutes,
+      planned_paid_hours: paidHours,
+      updated_by_user_id: user.id,
+    })
+    .eq('id', shiftId)
+    .eq('home_id', homeId)
+
+  if (error) return { error: error.message }
+  revalidatePath(`/homes/${homeId}/rota/${periodId}`)
+  return { success: true, paidHours }
+}
+
+export async function addShiftForStaff(
+  homeId: string,
+  periodId: string,
+  staffId: string,
+  date: string,
+  templateId: string,
+  raw: { start_local: string; end_local: string; break_minutes: number }
+) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Unauthorised' }
+
+  const parsed = TimingSchema.safeParse(raw)
+  if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid times' }
+
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('role_code')
+    .eq('id', staffId)
+    .eq('home_id', homeId)
+    .single()
+  if (!staff) return { error: 'Staff not found' }
+
+  const { data: tmpl } = await supabase
+    .from('shift_pattern_templates')
+    .select('id')
+    .eq('id', templateId)
+    .eq('home_id', homeId)
+    .single()
+  if (!tmpl) return { error: 'Shift pattern not found' }
+
+  const { startUtc, endUtc, paidHours } = buildTimes(
+    date, parsed.data.start_local, parsed.data.end_local, parsed.data.break_minutes
+  )
+
+  const slotId = crypto.randomUUID()
+  const { error: slotError } = await supabase.from('shift_slots').insert({
+    id: slotId,
+    home_id: homeId,
+    tenant_id: homeId,
+    rota_period_id: periodId,
+    date,
+    shift_pattern_template_id: templateId,
+    role_code: staff.role_code ?? 'care_assistant',
+    headcount_required: 1,
+    created_by_user_id: user.id,
+  })
+  if (slotError) return { error: slotError.message }
+
+  const { error: shiftError } = await supabase.from('shifts').insert({
+    home_id: homeId,
+    tenant_id: homeId,
+    shift_slot_id: slotId,
+    staff_id: staffId,
+    state: 'assigned',
+    planned_start_utc: startUtc,
+    planned_end_utc: endUtc,
+    planned_break_minutes: parsed.data.break_minutes,
+    planned_paid_hours: paidHours,
+    created_by_user_id: user.id,
+  })
+  if (shiftError) return { error: shiftError.message }
+
+  revalidatePath(`/homes/${homeId}/rota/${periodId}`)
+  return { success: true }
+}
+
 export async function autoFillPeriodAction(homeId: string, periodId: string) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
