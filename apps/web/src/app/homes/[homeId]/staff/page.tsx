@@ -24,7 +24,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       .single(),
     supabase
       .from('staff')
-      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible, role_code, shift_type')
+      .select('id, first_name, last_name, employee_number, status, overtime_weighting, overtime_eligible, role_code, shift_type, specialisms')
       .eq('home_id', homeId)
       .order('last_name')
       .order('first_name'),
@@ -35,7 +35,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       .order('effective_from', { ascending: false }),
     supabase
       .from('staff_pay_rates')
-      .select('staff_id, role_code, rate_weekday_pence')
+      .select('staff_id, role_code, rate_weekday_pence, rate_weekend_pence')
       .eq('home_id', homeId)
       .order('effective_from', { ascending: false }),
     supabase
@@ -81,6 +81,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       status:            s.status,
       role_code:         s.role_code ?? null,
       shift_type:        s.shift_type ?? 'both',
+      specialisms:       (s.specialisms ?? []) as string[],
       overtime_weighting: s.overtime_weighting != null ? Number(s.overtime_weighting) : null,
       overtime_eligible:  s.overtime_eligible ?? null,
       contract: c ? {
@@ -91,6 +92,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
       payRate: pr ? {
         role_code:           pr.role_code ?? null,
         rate_weekday_pence:  pr.rate_weekday_pence,
+        rate_weekend_pence:  pr.rate_weekend_pence,
       } : null,
       leave: lb ? {
         entitlement_value: Number(lb.entitlement_value),
@@ -114,7 +116,7 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
   }
 
   return (
-    <div className="px-6 py-8 lg:px-8 max-w-[1280px] mx-auto">
+    <div className="px-6 py-8 lg:px-8 max-w-[1720px] mx-auto">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-ink">Staff directory</h1>

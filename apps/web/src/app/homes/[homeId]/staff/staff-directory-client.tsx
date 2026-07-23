@@ -4,7 +4,8 @@ import { useState, useMemo, Fragment } from 'react'
 import Link from 'next/link'
 import { WeightingInput } from './weighting-input'
 import { RoleSelect } from './role-select'
-import { ShiftTypeSelect, ContractStatusSelect, LeaveEdit } from './inline-editors'
+import { ShiftTypeSelect, ContractStatusSelect, LeaveField } from './inline-editors'
+import { SpecialistRolesSelect } from './specialist-roles-select'
 import { StaffActionMenu } from './staff-action-menu'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -62,6 +63,7 @@ export type EnrichedStaff = {
   status: string
   role_code: string | null
   shift_type: string
+  specialisms: string[]
   overtime_weighting: number | null
   overtime_eligible: boolean | null
   contract: {
@@ -72,6 +74,7 @@ export type EnrichedStaff = {
   payRate: {
     role_code: string | null
     rate_weekday_pence: number
+    rate_weekend_pence: number
   } | null
   leave: {
     entitlement_value: number
@@ -212,10 +215,14 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">Name</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Role</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Shift</th>
+                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Specialist roles</th>
                   <th className="px-6 py-3 text-xs font-medium text-muted-foreground">Contract</th>
-                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Hrs/wk</th>
-                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Pay rate</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Annual leave: entitlement / taken = remaining (hours). Editable.">Annual leave</th>
+                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-center">Contracted hrs/wk</th>
+                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Weekday rate</th>
+                  <th className="px-6 py-3 text-xs font-medium text-muted-foreground text-right">Weekend rate</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Annual leave allocated (entitlement), hours. Editable.">AL allocated</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Annual leave taken so far, hours. Editable.">AL taken</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Allocated minus taken.">AL remaining</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle text-center" title="Overtime auto-fill priority. Active eligible staff only.">Weighting</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">Status</th>
                   <th className="px-4 py-3" />
@@ -225,7 +232,7 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                 {roleGroups.map(([roleKey, members]) => (
                   <Fragment key={roleKey}>
                     <tr className="border-b border-border bg-canvas/60">
-                      <td colSpan={10} className="px-6 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+                      <td colSpan={14} className="px-6 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
                         {roleKey === '__unassigned__' ? 'No role assigned' : fmtRole(roleKey)}
                         <span className="ml-2 font-normal normal-case tracking-normal text-ink-subtle/70">({members.length})</span>
                       </td>
@@ -253,22 +260,38 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
                             <ShiftTypeSelect homeId={homeId} staffId={s.id} value={s.shift_type} />
                           </td>
                           <td className="px-6 py-3">
+                            <SpecialistRolesSelect homeId={homeId} staffId={s.id} value={s.specialisms} />
+                          </td>
+                          <td className="px-6 py-3">
                             <ContractStatusSelect homeId={homeId} staffId={s.id} contractType={s.contract?.contract_type ?? null} status={s.status} />
                           </td>
-                          <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
+                          <td className="px-6 py-3 text-center tabular-nums text-sm text-ink-muted">
                             {s.contract ? fmtHours(s.contract.contracted_hours_per_week) : '—'}
                           </td>
                           <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
                             {s.payRate ? fmtPence(s.payRate.rate_weekday_pence) : '—'}
                           </td>
-                          <td className="px-6 py-3">
-                            <LeaveEdit
-                              homeId={homeId} staffId={s.id}
-                              entitlement={s.leave?.entitlement_value ?? s.contract?.holiday_entitlement_value ?? 0}
-                              taken={s.leave?.taken_value ?? 0}
-                              unit={s.leave ? unit : homeUnit}
-                            />
+                          <td className="px-6 py-3 text-right tabular-nums text-sm text-ink-muted">
+                            {s.payRate ? fmtPence(s.payRate.rate_weekend_pence) : '—'}
                           </td>
+                          {(() => {
+                            const ent = s.leave?.entitlement_value ?? s.contract?.holiday_entitlement_value ?? 0
+                            const taken = s.leave?.taken_value ?? 0
+                            const remaining = Math.round((ent - taken) * 10) / 10
+                            return (
+                              <>
+                                <td className="px-6 py-3">
+                                  <LeaveField homeId={homeId} staffId={s.id} field="entitlement" value={ent} otherValue={taken} />
+                                </td>
+                                <td className="px-6 py-3">
+                                  <LeaveField homeId={homeId} staffId={s.id} field="taken" value={taken} otherValue={ent} />
+                                </td>
+                                <td className="px-6 py-3 text-center tabular-nums font-medium text-sm">
+                                  <span className={remaining < 3 ? 'text-amber-600' : 'text-green-700'}>{remaining}{s.leave ? unit : homeUnit}</span>
+                                </td>
+                              </>
+                            )
+                          })()}
                           <td className="px-6 py-3 text-center">
                             {!isActive
                               ? <span className="text-xs text-muted-foreground/50 italic">—</span>
@@ -307,9 +330,13 @@ export function StaffDirectoryClient({ homeId, homeUnit, staff, roles, stats, st
             { col: 'Role',           desc: 'Position (editable). Matches CareStream. Changing it resets overtime eligibility to the role default.' },
             { col: 'Shift',          desc: 'Whether they work Day, Night, or Both. Matches CareStream shift pattern.' },
             { col: 'Contract',       desc: 'Full time / Part time / Bank / Zero hours, or Long-term sick (removes them from the rota and the overtime pool).' },
-            { col: 'Hrs/wk',         desc: 'Contracted hours per week under the current contract.' },
-            { col: 'Pay rate',       desc: 'Weekday pay rate from the most recent pay rate record.' },
-            { col: 'Annual leave',   desc: 'Entitlement / taken = remaining (hours). Editable — type in the two boxes. Fill in anyone the holiday import missed.' },
+            { col: 'Contracted hrs/wk', desc: 'Contracted hours per week under the current contract.' },
+            { col: 'Weekday rate',   desc: 'Weekday hourly pay rate (most recent pay rate record).' },
+            { col: 'Weekend rate',   desc: 'Weekend hourly pay rate. Often the same as weekday, but can differ.' },
+            { col: 'AL allocated',   desc: 'Annual leave entitlement (hours). Editable — fill in anyone the holiday import missed.' },
+            { col: 'AL taken',       desc: 'Annual leave taken so far this year (hours). Editable.' },
+            { col: 'AL remaining',   desc: 'Allocated minus taken. Amber when under 3.' },
+            { col: 'Specialist roles', desc: 'Any specialist/champion roles the person holds (Safeguarding lead, IPC lead, Fire safety, etc.). Multi-select.' },
             { col: 'Weighting',      desc: 'Overtime pool share — all active eligible staff share 100%. Adjusting one auto-redistributes the rest.' },
             { col: 'Status',         desc: 'Employment status. Weighting is only shown for active staff.' },
           ].map(({ col, desc }) => (

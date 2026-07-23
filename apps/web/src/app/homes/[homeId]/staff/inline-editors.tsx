@@ -64,6 +64,36 @@ export function ContractStatusSelect({
   )
 }
 
+// A single editable annual-leave figure (allocated OR taken). Saves the pair together, using the
+// sibling's current value passed in as `otherValue`.
+export function LeaveField({
+  homeId, staffId, field, value, otherValue,
+}: { homeId: string; staffId: string; field: 'entitlement' | 'taken'; value: number; otherValue: number }) {
+  const router = useRouter()
+  const [v, setV] = useState(value)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function save() {
+    if (v === value) return
+    setSaving(true)
+    const ent = field === 'entitlement' ? v : otherValue
+    const tkn = field === 'taken' ? v : otherValue
+    await updateLeave(homeId, staffId, ent, tkn)
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 1500); router.refresh()
+  }
+
+  return (
+    <div className="flex items-center gap-1 justify-center">
+      <input type="number" min={0} step={0.5} value={v}
+        onChange={e => setV(Math.max(0, Number(e.target.value)))}
+        onBlur={save} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        className={numCls} />
+      <Tick saving={saving} saved={saved} />
+    </div>
+  )
+}
+
 export function LeaveEdit({
   homeId, staffId, entitlement, taken, unit,
 }: { homeId: string; staffId: string; entitlement: number; taken: number; unit: string }) {

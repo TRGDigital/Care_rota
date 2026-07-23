@@ -63,6 +63,19 @@ export async function updateContractStatus(homeId: string, staffId: string, valu
   return { ok: true }
 }
 
+// Specialist / champion roles a staff member holds (multi-select).
+export async function updateSpecialisms(homeId: string, staffId: string, specialisms: string[]) {
+  const { supabase, user } = await requireUser()
+  if (!user) return { error: 'Unauthorised' }
+  const clean = Array.isArray(specialisms) ? [...new Set(specialisms.map(String).filter(Boolean))] : []
+  const { error } = await supabase.from('staff')
+    .update({ specialisms: clean, updated_by_user_id: user.id })
+    .eq('id', staffId).eq('home_id', homeId)
+  if (error) return { error: error.message }
+  revalidatePath(`/homes/${homeId}/staff`)
+  return { ok: true }
+}
+
 // Manually set annual-leave entitlement / taken (hours). Creates the balance row if missing so the
 // staff whose names didn't match the holiday import can be filled in by hand.
 export async function updateLeave(homeId: string, staffId: string, entitlement: number, taken: number) {
