@@ -289,21 +289,26 @@ export async function autoFillPeriod(
   type SlotLite = {
     role_code: string
     date: string
-    shift_pattern_templates: { paid_hours_decimal: number } | { paid_hours_decimal: number }[] | null
+    shift_pattern_templates:
+      | { paid_hours_decimal: number; start_time_local: string }
+      | { paid_hours_decimal: number; start_time_local: string }[]
+      | null
   }
-  const slotHours = (s: SlotLite): number => {
-    const t = Array.isArray(s.shift_pattern_templates) ? s.shift_pattern_templates[0] : s.shift_pattern_templates
-    return t ? Number(t.paid_hours_decimal) : 0
-  }
-  // Role priority, then date, then LONGEST shift first. Filling long shifts before short ones means
-  // staff with the most room take the full days, and the short shift lands on whoever is left nearest
-  // their contract — minimising the overtime it creates.
+  const slotTmpl = (s: SlotLite) =>
+    Array.isArray(s.shift_pattern_templates) ? s.shift_pattern_templates[0] : s.shift_pattern_templates
+  const slotHours = (s: SlotLite): number => Number(slotTmpl(s)?.paid_hours_decimal ?? 0)
+  const slotStart = (s: SlotLite): string => slotTmpl(s)?.start_time_local ?? '00:00'
+  // Role priority, then date, then LONGEST shift first, then EARLIEST start. Filling long shifts
+  // before short ones means staff with the most room take the full days; filling morning before
+  // afternoon means the afternoon half can be paired to whoever already has that morning.
   const sortedSlots = [...slots].sort((a: SlotLite, b: SlotLite) => {
     const rDiff = rolePriority(a.role_code) - rolePriority(b.role_code)
     if (rDiff !== 0) return rDiff
     const dDiff = a.date.localeCompare(b.date)
     if (dDiff !== 0) return dDiff
-    return slotHours(b) - slotHours(a)
+    const hDiff = slotHours(b) - slotHours(a)
+    if (hDiff !== 0) return hDiff
+    return slotStart(a).localeCompare(slotStart(b))
   })
 
   // ── 7. Main fill loop ─────────────────────────────────────────────────
@@ -334,6 +339,10 @@ export async function autoFillPeriod(
       const shiftEnd = new Date(shift.planned_end_utc)
       const shiftHours = Number(shift.planned_paid_hours)
 
+      // An afternoon half-shift (short day shift starting midday or later) is only ever paired to
+      // someone who already holds that morning — so no one gets an afternoon without the morning.
+      const isAfternoonHalf = !isNight && shiftHours <= 7 && shiftStart.getUTCHours() >= 12
+
       // Evaluate each staff member as a candidate
       const ranked: Array<{ staffId: string; overtimeAdded: number; hoursDeficit: number; weighting: number; lastAlloc: number; reason: string }> = []
 
@@ -341,6 +350,17 @@ export async function autoFillPeriod(
         const sid = staff.id
         const contract = contractsByStaff.get(sid)
         if (!contract) continue // no active contract
+
+        // --- Filter: afternoon half must be paired to that morning ---
+        if (isAfternoonHalf) {
+          const confirmed = confirmedByStaff.get(sid) ?? []
+          const hasMorningSameDay = confirmed.some(cs =>
+            cs.startUtc.toISOString().slice(0, 10) === slot.date &&
+            cs.startUtc.getUTCHours() < 12 &&
+            cs.endUtc.getTime() <= shiftStart.getTime()
+          )
+          if (!hasMorningSameDay) continue
+        }
 
         // --- Filter: shift pattern preference ---
         const pref = contract.shift_pattern_preference

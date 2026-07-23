@@ -7,6 +7,7 @@ export function PageShell({
   action,
   backHref,
   backLabel = 'Back',
+  fullWidth = false,
   children,
 }: {
   title: string
@@ -14,10 +15,11 @@ export function PageShell({
   action?: React.ReactNode
   backHref?: string
   backLabel?: string
+  fullWidth?: boolean
   children?: React.ReactNode
 }) {
   return (
-    <div className="px-6 py-8 lg:px-8 max-w-[1280px] mx-auto">
+    <div className={`px-6 py-8 lg:px-8 ${fullWidth ? '' : 'max-w-[1280px] mx-auto'}`}>
       {/* Back link */}
       {backHref && (
         <Link

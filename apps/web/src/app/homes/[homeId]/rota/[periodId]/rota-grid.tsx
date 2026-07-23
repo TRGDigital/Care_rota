@@ -326,9 +326,8 @@ export function RotaGrid({
         </div>
       )}
 
-      {/* Grid — breaks out of the centred page shell on wide screens so the full week + summary
-          columns show with less horizontal scrolling. */}
-      <div className="overflow-x-auto -mx-6 lg:-mx-8 xl:-mx-24 2xl:-mx-48 px-6 lg:px-8 xl:px-24 2xl:px-48">
+      {/* Grid — spans the full content width (the page shell runs full-width for the rota). */}
+      <div className="overflow-x-auto -mx-6 lg:-mx-8 px-6 lg:px-8">
         <table className="min-w-full text-xs border-separate border-spacing-0">
           <thead>
             <tr>
@@ -747,19 +746,19 @@ function ShiftChip({
     : isPremium ? 'premium'
     : (halfDay && isAfternoon) ? 'pm' : 'day'
   const T = {
-    night:   { card: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-900', sub: 'text-indigo-700', mark: '🌙 ' },
-    manager: { card: 'bg-purple-100 border-purple-300', text: 'text-purple-900', sub: 'text-purple-700', mark: '' },
-    chef:    { card: 'bg-orange-100 border-orange-300', text: 'text-orange-900', sub: 'text-orange-700', mark: '' },
-    pm:      { card: 'bg-teal-50 border-teal-200',      text: 'text-foreground/80', sub: 'text-teal-700', mark: '' },
-    premium: { card: 'bg-amber-100 border-amber-300',   text: 'text-foreground/80', sub: 'text-amber-700', mark: '' },
-    day:     { card: 'bg-green-50 border-green-200',     text: 'text-foreground/80', sub: 'text-muted-foreground', mark: '' },
+    night:   { card: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-900', sub: 'text-indigo-700', mark: '🌙 ', badge: 'bg-indigo-600 text-white' },
+    manager: { card: 'bg-purple-100 border-purple-300', text: 'text-purple-900', sub: 'text-purple-700', mark: '', badge: 'bg-purple-600 text-white' },
+    chef:    { card: 'bg-orange-100 border-orange-300', text: 'text-orange-900', sub: 'text-orange-700', mark: '', badge: 'bg-orange-600 text-white' },
+    pm:      { card: 'bg-teal-50 border-teal-200',      text: 'text-foreground/80', sub: 'text-teal-700', mark: '', badge: 'bg-teal-600 text-white' },
+    premium: { card: 'bg-amber-100 border-amber-300',   text: 'text-foreground/80', sub: 'text-amber-700', mark: '', badge: 'bg-amber-600 text-white' },
+    day:     { card: 'bg-green-50 border-green-200',     text: 'text-foreground/80', sub: 'text-muted-foreground', mark: '', badge: 'bg-green-700 text-white' },
   }[tint]
 
   return (
     <div className={`group/chip rounded p-1.5 text-xs border ${T.card}`}>
       <div className="flex items-center justify-between gap-1 leading-tight">
         <span className="flex items-center gap-1 min-w-0">
-          {period && <span className={`shrink-0 text-[9px] font-bold px-1 rounded bg-white/70 ${T.sub}`}>{period}</span>}
+          {period && <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded ${T.badge}`}>{period}</span>}
           <span className={`font-medium truncate ${T.text}`}>{tpl?.name ?? '—'}</span>
         </span>
         <span className={`shrink-0 tabular-nums font-semibold ${T.sub}`}>{paid}h</span>
