@@ -86,9 +86,11 @@ describe('Cost guard', () => {
     expect(result).toBeNull()
   })
 
-  it('AT-2: proposes 2 cuts when 6 shifts, matrix min = 4', async () => {
+  it('AT-2: proposes 2 cuts when 6 shifts and occupancy scales the requirement to 4', async () => {
+    // capacity 60, occupied 35 → 35/60 ≈ 0.58 → ceil(6*0.58)=4 = floor → 2 excess
     const sixShifts = Array.from({ length: 6 }, (_, i) => makeShift(i))
     const client = makeClient({
+      homes: { bed_capacity: 60 },
       bed_occupancy_snapshots: snapshot,
       dependency_assessments: assessments,
       staffing_matrices: matrix,
@@ -104,6 +106,7 @@ describe('Cost guard', () => {
   it('AT-3: totalSavingsPence equals sum of individual cuts', async () => {
     const sixShifts = Array.from({ length: 6 }, (_, i) => makeShift(i))
     const client = makeClient({
+      homes: { bed_capacity: 60 },
       bed_occupancy_snapshots: snapshot,
       dependency_assessments: assessments,
       staffing_matrices: matrix,
@@ -137,24 +140,26 @@ describe('Cost guard', () => {
   })
 
   it('AT-6: classifies shift blocks correctly by UTC hour', async () => {
-    // morning=08:00, afternoon=14:00, night=01:00, long_day=20:00
-    const oneNightShift = [makeShift(0, 1, 9)]  // 01:00 → night block
+    // Two 01:00 shifts → night block; low occupancy (10/40) scales 2 → 1, cutting one.
+    const twoNightShifts = [makeShift(0, 1, 9), makeShift(1, 1, 9)]
     const nightMatrix = [
       { shift_block: 'night', min_carers: 0, min_senior_carers: 0, min_nurses: 0, min_ancillary: 0 },
     ]
     const client = makeClient({
-      bed_occupancy_snapshots: snapshot,
+      homes: { bed_capacity: 40 },
+      bed_occupancy_snapshots: { occupied_beds: 10, snapshot_at: '2026-05-01T08:00:00Z' },
       dependency_assessments: assessments,
       staffing_matrices: nightMatrix,
-      shifts: oneNightShift,
+      shifts: twoNightShifts,
     })
     const result = await runCostGuard(client, HOME_ID)
     expect(result).not.toBeNull()
     expect(result!.proposedCuts[0].shiftBlock).toBe('night')
   })
 
-  it('AT-7: dependency totals use latest assessment per resident only', async () => {
-    // r1 has two assessments — only the first (already sorted desc) should count
+  it('AT-7: still produces cuts regardless of duplicate dependency assessments', async () => {
+    // Dependency no longer drives the occupancy-scaled cut model, but stale/duplicate
+    // assessment rows must not break the guard. It should still cut on occupancy alone.
     const duplicateAssessments = [
       { resident_id: 'r1', overall_band: 'high',   assessment_date: '2026-05-10' },
       { resident_id: 'r1', overall_band: 'low',    assessment_date: '2026-04-01' }, // older
@@ -162,13 +167,12 @@ describe('Cost guard', () => {
     ]
     const sixShifts = Array.from({ length: 6 }, (_, i) => makeShift(i))
     const client = makeClient({
+      homes: { bed_capacity: 60 },
       bed_occupancy_snapshots: snapshot,
       dependency_assessments: duplicateAssessments,
       staffing_matrices: matrix,
       shifts: sixShifts,
     })
-    // Just verifying it doesn't crash and still produces cuts (dependency totals
-    // are passed to computeProposedCuts; deduplication tested by no double-count)
     const result = await runCostGuard(client, HOME_ID)
     expect(result).not.toBeNull()
   })
