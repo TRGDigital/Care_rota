@@ -3,45 +3,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 type Supabase = SupabaseClient<Database>
 
-async function getStaffRole(supabase: Supabase, homeId: string, staffId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from('staff_pay_rates')
-    .select('role_code')
-    .eq('staff_id', staffId)
-    .eq('home_id', homeId)
-    .order('effective_from', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  return data?.role_code ?? null
-}
+// The overtime weighting is a % SHARE of the overtime pool. The pool is every active,
+// overtime-eligible staff member (across roles), and the shares always sum to 100%. Adjusting
+// one person redistributes the remainder equally across the others, so e.g. 11 eligible staff
+// sit at ~9.09% each by default.
 
-async function getEligibleInRole(supabase: Supabase, homeId: string, role: string | null): Promise<string[]> {
-  const { data: eligible } = await supabase
+async function getEligible(supabase: Supabase, homeId: string): Promise<string[]> {
+  const { data } = await supabase
     .from('staff')
     .select('id')
     .eq('home_id', homeId)
     .eq('overtime_eligible', true)
     .eq('status', 'active')
-
-  const ids = (eligible ?? []).map(s => s.id)
-  if (ids.length === 0) return []
-
-  const { data: rates } = await supabase
-    .from('staff_pay_rates')
-    .select('staff_id, role_code')
-    .eq('home_id', homeId)
-    .in('staff_id', ids)
-    .order('effective_from', { ascending: false })
-
-  const latestRole = new Map<string, string | null>()
-  for (const r of rates ?? []) {
-    if (!latestRole.has(r.staff_id)) latestRole.set(r.staff_id, r.role_code)
-  }
-  for (const id of ids) {
-    if (!latestRole.has(id)) latestRole.set(id, null)
-  }
-
-  return ids.filter(id => latestRole.get(id) === role)
+  return (data ?? []).map(s => s.id)
 }
 
 function round4(n: number): number {
@@ -55,10 +29,8 @@ export async function setWeightingWithRedistribution(
   newWeight: number,
   userId: string,
 ): Promise<void> {
-  const role = await getStaffRole(supabase, homeId, staffId)
-  const inRole = await getEligibleInRole(supabase, homeId, role)
-  const others = inRole.filter(id => id !== staffId)
-
+  const eligible = await getEligible(supabase, homeId)
+  const others = eligible.filter(id => id !== staffId)
   const otherWeight = others.length > 0 ? round4((100 - newWeight) / others.length) : 0
 
   await supabase.from('staff')
@@ -74,20 +46,18 @@ export async function setWeightingWithRedistribution(
   }
 }
 
-export async function resetRoleToEqualShares(
+// Reset the whole eligible pool to equal shares. Call after the pool membership changes
+// (someone becomes eligible/ineligible, changes role, goes on long-term sick, etc.).
+export async function resetToEqualShares(
   supabase: Supabase,
   homeId: string,
-  staffId: string,
   userId: string,
 ): Promise<void> {
-  const role = await getStaffRole(supabase, homeId, staffId)
-  const inRole = await getEligibleInRole(supabase, homeId, role)
-  if (inRole.length === 0) return
-
-  const equalShare = round4(100 / inRole.length)
-
+  const eligible = await getEligible(supabase, homeId)
+  if (eligible.length === 0) return
+  const equalShare = round4(100 / eligible.length)
   await supabase.from('staff')
     .update({ overtime_weighting: equalShare, updated_by_user_id: userId })
-    .in('id', inRole)
+    .in('id', eligible)
     .eq('home_id', homeId)
 }

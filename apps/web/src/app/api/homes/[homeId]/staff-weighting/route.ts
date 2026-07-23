@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { setWeightingWithRedistribution, resetRoleToEqualShares } from '@/lib/redistribute-weighting'
+import { setWeightingWithRedistribution, resetToEqualShares } from '@/lib/redistribute-weighting'
 
 export async function POST(
   request: Request,
@@ -38,7 +38,7 @@ export async function POST(
       .eq('home_id', homeId)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    await resetRoleToEqualShares(supabase, homeId, staffId, user.id)
+    await resetToEqualShares(supabase, homeId, user.id)
   }
 
   return NextResponse.json({ success: true })

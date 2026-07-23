@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { resetToEqualShares } from '@/lib/redistribute-weighting'
 
 // Update a staff member's position/role. Overtime eligibility follows the role's default policy
 // (hands-on roles eligible, ancillary approval-required) so changing role fixes their overtime pool.
@@ -25,6 +26,8 @@ export async function updateStaffRole(homeId: string, staffId: string, roleCode:
     .eq('home_id', homeId)
 
   if (error) return { error: error.message }
+  // A role change can add/remove this person from the overtime pool → rebalance shares to 100%.
+  await resetToEqualShares(supabase, homeId, user.id)
   revalidatePath(`/homes/${homeId}/staff`)
   return { ok: true }
 }

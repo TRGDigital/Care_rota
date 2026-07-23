@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
-import { resetRoleToEqualShares } from '@/lib/redistribute-weighting'
+import { resetToEqualShares } from '@/lib/redistribute-weighting'
 
 const CreateStaffSchema = z.object({
   first_name: z.string().min(1).max(100),
@@ -149,7 +149,7 @@ export async function updateStaff(homeId: string, staffId: string, formData: For
     (current.status === 'active' || status === 'active')
 
   if (eligibilityChanged || activeStatusChanged) {
-    await resetRoleToEqualShares(supabase, homeId, staffId, user.id)
+    await resetToEqualShares(supabase, homeId, user.id)
   }
 
   revalidatePath(`/homes/${homeId}/staff`)
