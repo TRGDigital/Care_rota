@@ -124,7 +124,10 @@ export default async function StaffDirectoryPage({ params }: { params: Promise<{
             {staff.length} staff member{staff.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <AddStaffModal homeId={homeId} />
+        <div className="flex items-center gap-2">
+          <a href={`/homes/${homeId}/import`} className="text-sm border border-border rounded-md px-3 py-2 text-ink hover:bg-canvas/60">Import from payroll</a>
+          <AddStaffModal homeId={homeId} />
+        </div>
       </div>
 
       <StaffDirectoryClient
